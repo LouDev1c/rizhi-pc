@@ -1,0 +1,409 @@
+const fs = require('fs/promises');
+const path = require('path');
+
+const LEGACY_DATA_FILE_NAME = 'whbr-data.json';
+const DATA_FILE_PREFIX = 'whbr-data-';
+const DATA_FILE_PATTERN = 'whbr-data-YYYY-MM.json';
+const DATA_FILE_REGEX = /^whbr-data-(\d{4}-\d{2})\.json$/;
+const SETTINGS_FILE_NAME = 'whbr-settings.json';
+const SETTINGS_LOCATION_FILE_NAME = 'whbr-settings-location.json';
+
+function createDefaultData() {
+  return {
+    version: 2,
+    tasks: [],
+    journals: [],
+    profile: {},
+    updatedAt: new Date().toISOString()
+  };
+}
+
+function getDefaultDataPath(app) {
+  return getMonthlyDataPath(getDefaultMemoryDir(app), monthKeyFromDate(new Date()));
+}
+
+function getDefaultSettingsPath(app) {
+  return path.join(getDefaultMemoryDir(app), SETTINGS_FILE_NAME);
+}
+
+function getSettingsLocationPath(app) {
+  return path.join(getDefaultMemoryDir(app), SETTINGS_LOCATION_FILE_NAME);
+}
+
+function getDefaultMemoryDir(app) {
+  const appRoot = app.isPackaged ? path.dirname(process.execPath) : app.getAppPath();
+  return path.join(appRoot, 'memory');
+}
+
+async function getDataDirectory(app) {
+  const settings = await readSettings(app);
+  if (settings.dataDirectory) return settings.dataDirectory;
+  if (settings.dataFilePath) return path.dirname(settings.dataFilePath);
+  return getDefaultMemoryDir(app);
+}
+
+async function getDataPath(app) {
+  return getMonthlyDataPath(await getDataDirectory(app), monthKeyFromDate(new Date()));
+}
+
+function getMonthlyDataPath(dataDirectory, monthKey) {
+  return path.join(dataDirectory, `${DATA_FILE_PREFIX}${monthKey}.json`);
+}
+
+async function getActiveSettingsPath(app) {
+  const locationPath = getSettingsLocationPath(app);
+
+  try {
+    const text = await fs.readFile(locationPath, 'utf8');
+    const location = JSON.parse(text);
+    return location.settingsFilePath || getDefaultSettingsPath(app);
+  } catch (error) {
+    return getDefaultSettingsPath(app);
+  }
+}
+
+async function readSettings(app) {
+  const settingsPath = await getActiveSettingsPath(app);
+
+  try {
+    const text = await fs.readFile(settingsPath, 'utf8');
+    return JSON.parse(text);
+  } catch (error) {
+    return {};
+  }
+}
+
+async function writeSettings(app, settings) {
+  const settingsPath = await getActiveSettingsPath(app);
+  await fs.mkdir(path.dirname(settingsPath), { recursive: true });
+  await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf8');
+  return settingsPath;
+}
+
+async function loadData(app) {
+  const dataDirectory = await getDataDirectory(app);
+  const settingsFilePath = await getActiveSettingsPath(app);
+  const settings = await readSettings(app);
+  const monthlyFiles = await listMonthlyDataFiles(dataDirectory);
+  const monthlyData = await readMonthlyDataFiles(monthlyFiles);
+  const legacyData = await readLegacyData(dataDirectory);
+  const data = normalizeData({
+    ...createDefaultData(),
+    tasks: dedupeById([...legacyData.tasks, ...monthlyData.tasks]),
+    journals: dedupeById([...legacyData.journals, ...monthlyData.journals]),
+    profile: {
+      ...(legacyData.profile || {}),
+      ...(monthlyData.profile || {}),
+      ...(settings.profile || {})
+    },
+    updatedAt: monthlyData.updatedAt || legacyData.updatedAt || new Date().toISOString()
+  });
+
+  return {
+    data,
+    paths: buildPaths(app, dataDirectory, settingsFilePath, monthlyFiles),
+    status: monthlyFiles.length > 0 || legacyData.hasData ? 'ok' : 'empty'
+  };
+}
+
+async function saveData(app, data) {
+  const dataDirectory = await getDataDirectory(app);
+  const settingsFilePath = await getActiveSettingsPath(app);
+  const normalized = normalizeData(data);
+  const updatedAt = new Date().toISOString();
+  normalized.updatedAt = updatedAt;
+
+  await fs.mkdir(dataDirectory, { recursive: true });
+  await saveProfileToSettings(app, normalized.profile);
+  await writeMonthlyDataFiles(dataDirectory, normalized, updatedAt);
+
+  const monthlyFiles = await listMonthlyDataFiles(dataDirectory);
+  return {
+    data: normalized,
+    paths: buildPaths(app, dataDirectory, settingsFilePath, monthlyFiles),
+    status: 'ok'
+  };
+}
+
+async function setDataPath(app, dataPathOrDirectory, currentData) {
+  const dataDirectory = path.extname(dataPathOrDirectory).toLowerCase() === '.json'
+    ? path.dirname(dataPathOrDirectory)
+    : dataPathOrDirectory;
+  const settings = await readSettings(app);
+  await writeSettings(app, {
+    ...settings,
+    dataDirectory,
+    dataFilePath: undefined
+  });
+  await saveData(app, currentData || createDefaultData());
+  return loadData(app);
+}
+
+async function setSettingsPath(app, settingsFilePath, currentData) {
+  const currentSettings = await readSettings(app);
+  const nextSettings = {
+    ...currentSettings,
+    settingsFilePath,
+    dataDirectory: currentSettings.dataDirectory || (await getDataDirectory(app))
+  };
+  const locationPath = getSettingsLocationPath(app);
+
+  await fs.mkdir(path.dirname(settingsFilePath), { recursive: true });
+  await fs.writeFile(settingsFilePath, JSON.stringify(nextSettings, null, 2), 'utf8');
+  await fs.mkdir(path.dirname(locationPath), { recursive: true });
+  await fs.writeFile(locationPath, JSON.stringify({ settingsFilePath }, null, 2), 'utf8');
+  await saveData(app, currentData || createDefaultData());
+  return loadData(app);
+}
+
+async function resetData(app) {
+  const dataDirectory = await getDataDirectory(app);
+  const settingsFilePath = await getActiveSettingsPath(app);
+  const settingsLocationPath = getSettingsLocationPath(app);
+  const deleted = [];
+
+  await removeMonthlyDataFiles(dataDirectory, deleted);
+  await removeFileIfExists(path.join(dataDirectory, LEGACY_DATA_FILE_NAME), deleted);
+  await removeFileIfExists(settingsFilePath, deleted);
+  await removeFileIfExists(settingsLocationPath, deleted);
+
+  return {
+    data: createDefaultData(),
+    deleted,
+    paths: buildPaths(app, getDefaultMemoryDir(app), getDefaultSettingsPath(app), []),
+    status: 'reset'
+  };
+}
+
+async function getStoragePaths(app) {
+  const dataDirectory = await getDataDirectory(app);
+  const settingsFilePath = await getActiveSettingsPath(app);
+  const monthlyFiles = await listMonthlyDataFiles(dataDirectory);
+  return buildPaths(app, dataDirectory, settingsFilePath, monthlyFiles);
+}
+
+function buildPaths(app, dataDirectory, settingsFilePath, monthlyFiles = []) {
+  const currentMonth = monthKeyFromDate(new Date());
+  return {
+    dataDirectory,
+    dataFilePath: getMonthlyDataPath(dataDirectory, currentMonth),
+    dataFilePattern: path.join(dataDirectory, DATA_FILE_PATTERN),
+    monthlyDataFiles: monthlyFiles,
+    settingsFilePath,
+    settingsLocationPath: getSettingsLocationPath(app),
+    defaultMemoryDir: getDefaultMemoryDir(app),
+    legacyStorageKeys: ['whbr.tasks', 'whbr.journals']
+  };
+}
+
+async function listMonthlyDataFiles(dataDirectory) {
+  try {
+    const entries = await fs.readdir(dataDirectory, { withFileTypes: true });
+    return entries
+      .filter((entry) => entry.isFile() && DATA_FILE_REGEX.test(entry.name))
+      .map((entry) => path.join(dataDirectory, entry.name))
+      .sort();
+  } catch (error) {
+    if (error.code === 'ENOENT') return [];
+    throw error;
+  }
+}
+
+async function readMonthlyDataFiles(filePaths) {
+  const combined = createDefaultData();
+
+  for (const filePath of filePaths) {
+    try {
+      const text = await fs.readFile(filePath, 'utf8');
+      const data = normalizeData(JSON.parse(text));
+      combined.tasks.push(...data.tasks);
+      combined.journals.push(...data.journals);
+      combined.profile = { ...combined.profile, ...data.profile };
+      combined.updatedAt = data.updatedAt || combined.updatedAt;
+    } catch (error) {
+      // Ignore unreadable monthly shards so one damaged month does not block startup.
+    }
+  }
+
+  combined.tasks = dedupeById(combined.tasks);
+  combined.journals = dedupeById(combined.journals);
+  return combined;
+}
+
+async function readLegacyData(dataDirectory) {
+  const filePath = path.join(dataDirectory, LEGACY_DATA_FILE_NAME);
+
+  try {
+    const text = await fs.readFile(filePath, 'utf8');
+    return {
+      ...normalizeData(JSON.parse(text)),
+      hasData: true
+    };
+  } catch (error) {
+    return {
+      ...createDefaultData(),
+      hasData: false
+    };
+  }
+}
+
+async function writeMonthlyDataFiles(dataDirectory, data, updatedAt) {
+  const existingFiles = await listMonthlyDataFiles(dataDirectory);
+  const byMonth = new Map();
+
+  data.tasks.forEach((task) => {
+    collectDateMonths(task.date).forEach((monthKey) => {
+      ensureMonthData(byMonth, monthKey, data.profile, updatedAt).tasks.push(task);
+    });
+  });
+
+  data.journals.forEach((journal) => {
+    const normalizedJournal = normalizeJournalForStorage(journal);
+    collectDateMonths(normalizedJournal.dateRangeStart || normalizedJournal.date, normalizedJournal.dateRangeEnd).forEach((monthKey) => {
+      ensureMonthData(byMonth, monthKey, data.profile, updatedAt).journals.push(normalizedJournal);
+    });
+  });
+
+  for (const [monthKey, monthData] of byMonth.entries()) {
+    const filePath = getMonthlyDataPath(dataDirectory, monthKey);
+    monthData.tasks = dedupeById(monthData.tasks);
+    monthData.journals = dedupeById(monthData.journals);
+    await fs.writeFile(filePath, JSON.stringify(monthData, null, 2), 'utf8');
+  }
+
+  const activeFileNames = new Set(Array.from(byMonth.keys()).map((monthKey) => `${DATA_FILE_PREFIX}${monthKey}.json`));
+  for (const filePath of existingFiles) {
+    if (!activeFileNames.has(path.basename(filePath))) {
+      await removeFileIfExists(filePath, []);
+    }
+  }
+}
+
+function ensureMonthData(byMonth, monthKey, profile, updatedAt) {
+  if (!byMonth.has(monthKey)) {
+    byMonth.set(monthKey, {
+      version: 2,
+      month: monthKey,
+      tasks: [],
+      journals: [],
+      profile,
+      updatedAt
+    });
+  }
+
+  return byMonth.get(monthKey);
+}
+
+async function saveProfileToSettings(app, profile) {
+  const settings = await readSettings(app);
+  await writeSettings(app, {
+    ...settings,
+    profile
+  });
+}
+
+async function removeMonthlyDataFiles(dataDirectory, deleted) {
+  const monthlyFiles = await listMonthlyDataFiles(dataDirectory);
+  for (const filePath of monthlyFiles) {
+    await removeFileIfExists(filePath, deleted);
+  }
+}
+
+async function removeFileIfExists(filePath, deleted) {
+  try {
+    await fs.unlink(filePath);
+    deleted.push(filePath);
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+}
+
+function normalizeData(data) {
+  return {
+    version: Number(data && data.version) || 2,
+    tasks: Array.isArray(data && data.tasks) ? data.tasks : [],
+    journals: Array.isArray(data && data.journals) ? data.journals : [],
+    profile: data && typeof data.profile === 'object' && !Array.isArray(data.profile) ? data.profile : {},
+    updatedAt: data && data.updatedAt ? data.updatedAt : new Date().toISOString()
+  };
+}
+
+function dedupeById(items) {
+  const seen = new Set();
+  return items.filter((item) => {
+    const key = item && item.id ? item.id : JSON.stringify(item);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function normalizeJournalForStorage(journal) {
+  const dateRangeStart = normalizeDate(journal && journal.dateRangeStart);
+  const dateRangeEnd = normalizeDate(journal && journal.dateRangeEnd);
+  const date = dateRangeStart || normalizeDate(journal && journal.date);
+
+  return {
+    ...journal,
+    date,
+    dateRangeStart,
+    dateRangeEnd
+  };
+}
+
+function collectDateMonths(startDate, endDate = '') {
+  const start = normalizeDate(startDate);
+  const end = normalizeDate(endDate) || start;
+  if (!start) return [];
+  if (!end || end < start) return [monthKeyFromDateString(start)];
+
+  const months = [];
+  const cursor = parseLocalDate(start);
+  const finish = parseLocalDate(end);
+
+  while (cursor <= finish) {
+    const monthKey = monthKeyFromDate(cursor);
+    if (!months.includes(monthKey)) months.push(monthKey);
+    cursor.setMonth(cursor.getMonth() + 1, 1);
+  }
+
+  return months;
+}
+
+function monthKeyFromDateString(date) {
+  return normalizeDate(date).slice(0, 7);
+}
+
+function monthKeyFromDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  return `${year}-${month}`;
+}
+
+function normalizeDate(value) {
+  const text = String(value || '').trim();
+  const match = text.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  if (!match) return '';
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(year, month - 1, day);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return '';
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+function parseLocalDate(date) {
+  const [year, month, day] = date.split('-').map(Number);
+  return new Date(year, month - 1, day);
+}
+
+module.exports = {
+  createDefaultData,
+  getStoragePaths,
+  loadData,
+  resetData,
+  saveData,
+  setDataPath,
+  setSettingsPath
+};

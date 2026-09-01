@@ -1,0 +1,456 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RiZhi</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">W</div>
+          <div>
+            <strong>RiZhi</strong>
+            <span>日程与记录</span>
+          </div>
+        </div>
+
+        <nav class="nav">
+          <button class="nav-item active" data-page="tasks" title="任务">
+            <span class="nav-icon">□</span>
+            <span>任务</span>
+          </button>
+          <button class="nav-item" data-page="records" title="记录">
+            <span class="nav-icon">◇</span>
+            <span>记录</span>
+          </button>
+          <button class="nav-item" data-page="profile" title="个人">
+            <span class="nav-icon">○</span>
+            <span>个人</span>
+          </button>
+          <button class="nav-item" data-page="settings" title="设置">
+            <span class="nav-icon">△</span>
+            <span>设置</span>
+          </button>
+        </nav>
+
+        <button id="backToCurrentTaskButton" class="now-task-button" type="button" title="回到当前任务" aria-label="回到当前任务">
+          <span>⌖</span>
+        </button>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">RiZhi</p>
+            <h1 id="pageTitle">任务</h1>
+          </div>
+          <div class="clock">
+            <span>系统时间</span>
+            <strong id="systemTime">--</strong>
+          </div>
+        </header>
+
+        <section id="tasksPage" class="page active">
+          <div id="emptyState" class="empty-state hidden"></div>
+
+          <div id="taskWorkspace" class="task-workspace hidden">
+            <div class="toolbar">
+              <div>
+                <h2>当日安排</h2>
+              </div>
+              <div class="toolbar-actions">
+                <label class="compact-date-picker">
+                  <span>查看日期</span>
+                  <input id="taskDateFilter" type="date" />
+                </label>
+                <button id="importMoreButton" class="secondary-button">批量创建任务</button>
+              </div>
+            </div>
+
+            <div id="statusBox" class="status-box hidden"></div>
+            <div id="taskList" class="task-list"></div>
+          </div>
+        </section>
+
+        <section id="profilePage" class="page">
+          <div class="profile-grid">
+            <section class="panel">
+              <h2>个人设置</h2>
+              <div class="reminder-rule-section">
+                <h3>课程提醒时间</h3>
+                <p class="muted">只用于标签为“课程”的任务，用来计算上课、下课和课间提醒。</p>
+                <div class="profile-settings-grid">
+                  <label class="field">
+                    <span>每节课程时间</span>
+                    <input id="classDuration" type="number" min="10" step="5" value="45" />
+                  </label>
+                  <label class="field">
+                    <span>课间时间</span>
+                    <input id="classBreakLength" type="number" min="1" step="1" value="10" />
+                  </label>
+                </div>
+              </div>
+
+              <div class="reminder-rule-section">
+                <h3>工作/学习提醒时间</h3>
+                <p class="muted">只用于标签为“工作”和“学习”的任务，用来计算专注和休息提醒。</p>
+                <div class="profile-settings-grid">
+                  <label class="field">
+                    <span>一次专注时长</span>
+                    <input id="workFocusLength" type="number" min="10" step="5" value="45" />
+                  </label>
+                  <label class="field">
+                    <span>休息时长</span>
+                    <input id="workBreakLength" type="number" min="1" step="1" value="10" />
+                  </label>
+                </div>
+                <label class="toggle-row">
+                  <input id="breakReminder" type="checkbox" checked />
+                  <span>长时间工作或学习后提醒活动身体、远眺放松</span>
+                </label>
+              </div>
+            </section>
+
+          </div>
+        </section>
+
+        <section id="recordsPage" class="page">
+          <div class="records-layout">
+            <section class="panel journal-editor">
+              <div class="section-head">
+                <div>
+                  <h2>每日生活记录</h2>
+                  <p class="muted">按日期记录当天发生的事、状态和复盘内容。</p>
+                </div>
+                <label class="date-picker">
+                  <span>日期</span>
+                  <input id="journalDate" type="date" />
+                </label>
+              </div>
+
+              <textarea id="journalContent" class="journal-textarea" placeholder="例如：今天上午工作比较顺，下午有些疲惫，晚上运动后状态恢复。"></textarea>
+
+              <div class="journal-actions">
+                <span id="journalSaveState" class="muted">尚未保存</span>
+                <button id="saveJournalButton" class="primary-button">保存记录</button>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="section-head">
+                <div>
+                  <h2>记录列表</h2>
+                </div>
+                <div class="record-filter">
+                  <label class="date-picker">
+                    <span>查看日期</span>
+                    <input id="journalViewDate" type="date" />
+                  </label>
+                  <button id="openJournalDateButton" class="secondary-button" type="button">查看记录</button>
+                </div>
+              </div>
+              <div id="journalList" class="journal-list"></div>
+            </section>
+          </div>
+        </section>
+
+        <section id="settingsPage" class="page">
+          <div class="settings-layout">
+            <section class="panel">
+              <h2>数据文件</h2>
+              <p class="muted">任务安排和每日记录会按月写入本地 JSON 文件，命名为 whbr-data-YYYY-MM.json。你可以自己选择保存文件夹，方便归档、备份或迁移。</p>
+
+              <div class="path-list">
+                <div class="path-row">
+                  <span>当前月份数据文件</span>
+                  <div class="path-control">
+                    <code id="dataFilePath">加载中...</code>
+                    <button id="chooseDataPathButton" class="folder-button" type="button" aria-label="选择数据文件夹">📁</button>
+                  </div>
+                </div>
+                <div class="path-row">
+                  <span>设置文件</span>
+                  <div class="path-control">
+                    <code id="settingsFilePath">加载中...</code>
+                    <button id="chooseSettingsPathButton" class="folder-button" type="button" aria-label="选择设置文件位置">📁</button>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel">
+              <h2>时间</h2>
+              <p class="muted">调试时可以临时设定软件时间。选择自定义时间后，会从确认的时间点开始按正常速度流逝。</p>
+              <div class="time-mode-group">
+                <label class="toggle-row">
+                  <input id="timeModeSystem" name="timeMode" type="radio" value="system" checked />
+                  <span>与系统时间保持一致</span>
+                </label>
+                <label class="toggle-row">
+                  <input id="timeModeCustom" name="timeMode" type="radio" value="custom" />
+                  <span>自己设定时间</span>
+                </label>
+              </div>
+              <div id="customTimeFields" class="custom-time-fields hidden">
+                <div class="form-row">
+                  <label class="field">
+                    <span>日期</span>
+                    <input id="customTimeDate" type="date" />
+                  </label>
+                  <label class="field">
+                    <span>时间</span>
+                    <input id="customTimeValue" type="time" step="1" />
+                  </label>
+                </div>
+                <button id="applyCustomTimeButton" class="primary-button" type="button">确认时间</button>
+              </div>
+            </section>
+
+            <section class="panel danger-panel">
+              <h2>数据删除</h2>
+              <p class="muted">可以删除某一天的全部安排和记录，也可以清空软件的全部本地数据。删除前都会二次确认。</p>
+              <label class="field compact-field">
+                <span>删除日期</span>
+                <input id="deleteDayDate" type="date" />
+              </label>
+              <div class="delete-actions">
+                <button id="openDeleteDayButton" class="danger-button" type="button">删除当天数据</button>
+                <button id="openResetButton" class="danger-button" type="button">重置全部数据</button>
+              </div>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div id="resetModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="resetTitle">
+      <div class="modal-card">
+        <div class="modal-header">
+          <div>
+            <p class="eyebrow">二次确认</p>
+            <h2 id="resetTitle">确认删除</h2>
+          </div>
+          <button id="closeResetModalButton" class="icon-button" aria-label="关闭">×</button>
+        </div>
+
+        <p id="resetDescription" class="muted">确认后会删除以下内容：</p>
+        <div id="resetPathList" class="reset-path-list"></div>
+
+        <label class="confirm-row">
+          <input id="resetConfirmCheck" type="checkbox" />
+          <span id="resetConfirmText">我确认删除这些 RiZhi 数据</span>
+        </label>
+
+        <div class="modal-actions">
+          <button id="cancelResetButton" class="secondary-button" type="button">取消</button>
+          <button id="confirmResetButton" class="danger-button" type="button" disabled>确认重置</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="taskEditModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="taskEditTitle">
+      <div class="modal-card">
+        <div class="modal-header">
+          <div>
+            <p class="eyebrow">完成记录</p>
+            <h2 id="taskEditTitle">填写详情</h2>
+          </div>
+          <button id="closeTaskEditModalButton" class="icon-button" aria-label="关闭">×</button>
+        </div>
+
+        <form id="taskEditForm" class="manual-form">
+          <label class="field">
+            <span>实际完成与反思</span>
+            <textarea id="taskDetails" class="detail-textarea" placeholder="记录实际完成了哪些具体任务、遇到的问题、复盘和反思。"></textarea>
+          </label>
+
+          <label class="field">
+            <span>完成情况</span>
+            <select id="taskStatus">
+              <option value="未评价">未评价</option>
+              <option value="已完成">已完成</option>
+              <option value="部分完成">部分完成</option>
+              <option value="未完成">未完成</option>
+            </select>
+          </label>
+
+          <div class="modal-actions">
+            <button type="button" id="cancelTaskEditButton" class="secondary-button">取消</button>
+            <button type="submit" class="primary-button">保存</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div id="importDateModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="importDateTitle">
+      <div class="modal-card small-modal">
+        <div class="modal-header">
+          <div>
+            <p class="eyebrow">导入日期</p>
+            <h2 id="importDateTitle">选择计划生效日期</h2>
+          </div>
+          <button id="closeImportDateModalButton" class="icon-button" aria-label="关闭">×</button>
+        </div>
+
+        <p id="importDateDescription" class="muted">这个文件没有多个明确日期，请选择计划开始和结束日期。</p>
+        <div class="form-row">
+          <label class="field">
+            <span>开始日期</span>
+            <input id="importStartDate" type="date" />
+          </label>
+          <label class="field">
+            <span>结束日期</span>
+            <input id="importEndDate" type="date" />
+          </label>
+        </div>
+
+        <div class="modal-actions">
+          <button id="cancelImportDateButton" class="secondary-button" type="button">取消</button>
+          <button id="confirmImportDateButton" class="primary-button" type="button">确认导入</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="importChoiceModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="importChoiceTitle">
+      <div class="modal-card wide-modal">
+        <div class="modal-header">
+          <div>
+            <p class="eyebrow">批量创建任务</p>
+            <h2 id="importChoiceTitle">选择批量创建方式</h2>
+          </div>
+          <button id="closeImportChoiceModalButton" class="icon-button" aria-label="关闭">×</button>
+        </div>
+
+        <div class="import-choice-grid">
+          <section class="import-choice-card">
+            <h3>课表</h3>
+            <p class="muted">适合一整个学期每周相对固定的课程安排。</p>
+            <div class="import-choice-actions">
+              <button id="manualScheduleButton" class="primary-button" type="button">手动添加课表</button>
+              <button id="fileScheduleButton" class="secondary-button" type="button">导入课表文件</button>
+            </div>
+          </section>
+
+          <section class="import-choice-card">
+            <h3>每日安排</h3>
+            <p class="muted">适合某一天或一段日期内的工作、学习、生活规划。</p>
+            <div class="import-choice-actions">
+              <button id="reusePreviousButton" class="secondary-button" type="button">复用前一天</button>
+              <button id="manualDailyPlanButton" class="primary-button" type="button">手动添加安排</button>
+              <button id="fileDailyPlanButton" class="secondary-button" type="button">导入安排文件</button>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <div id="scheduleTableModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="scheduleTableTitle">
+      <div class="modal-card table-modal-card">
+        <div class="modal-header">
+          <div>
+            <p class="eyebrow">手动课表</p>
+            <h2 id="scheduleTableTitle">填写学期课表</h2>
+          </div>
+          <button id="closeScheduleTableModalButton" class="icon-button" aria-label="关闭">×</button>
+        </div>
+
+        <div class="term-range">
+          <label class="field">
+            <span>学期开始</span>
+            <input id="termStartDate" type="date" />
+          </label>
+          <label class="field">
+            <span>学期结束</span>
+            <input id="termEndDate" type="date" />
+          </label>
+        </div>
+
+        <div class="editable-table-wrap">
+          <table class="editable-table">
+            <thead>
+              <tr>
+                <th>时间段</th>
+                <th>周一</th>
+                <th>周二</th>
+                <th>周三</th>
+                <th>周四</th>
+                <th>周五</th>
+                <th>周六</th>
+                <th>周日</th>
+                <th class="row-action-heading" aria-label="操作"></th>
+              </tr>
+            </thead>
+            <tbody id="scheduleTableBody"></tbody>
+          </table>
+        </div>
+
+        <button id="addScheduleRowButton" class="add-table-row" type="button">+</button>
+
+        <div class="modal-actions">
+          <button id="cancelScheduleTableButton" class="secondary-button" type="button">取消</button>
+          <button id="saveScheduleTableButton" class="primary-button" type="button">生成课程安排</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="dailyPlanTableModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="dailyPlanTableTitle">
+      <div class="modal-card table-modal-card">
+        <div class="modal-header">
+          <div>
+            <p class="eyebrow">手动安排</p>
+            <h2 id="dailyPlanTableTitle">填写每日安排</h2>
+          </div>
+          <button id="closeDailyPlanTableModalButton" class="icon-button" aria-label="关闭">×</button>
+        </div>
+
+        <label class="field compact-field">
+          <span>日期</span>
+          <input id="dailyPlanDate" type="date" />
+        </label>
+
+        <div class="editable-table-wrap">
+          <table class="editable-table daily-table">
+            <thead>
+              <tr>
+                <th>时间段</th>
+                <th>任务</th>
+                <th>标签</th>
+              </tr>
+            </thead>
+            <tbody id="dailyPlanTableBody"></tbody>
+          </table>
+        </div>
+
+        <button id="addDailyPlanRowButton" class="add-table-row" type="button">+</button>
+
+        <div class="modal-actions">
+          <button id="cancelDailyPlanTableButton" class="secondary-button" type="button">取消</button>
+          <button id="saveDailyPlanTableButton" class="primary-button" type="button">生成当日安排</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="journalViewModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="journalViewTitle">
+      <div class="modal-card">
+        <div class="modal-header">
+          <div>
+            <p class="eyebrow">每日生活记录</p>
+            <h2 id="journalViewTitle">查看记录</h2>
+          </div>
+          <button id="closeJournalViewModalButton" class="icon-button" aria-label="关闭">×</button>
+        </div>
+
+        <div id="journalViewContent" class="journal-view-content"></div>
+
+        <div class="modal-actions">
+          <button id="closeJournalViewButton" class="primary-button" type="button">关闭</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="./renderer.js"></script>
+  </body>
+</html>
