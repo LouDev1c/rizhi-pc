@@ -84,15 +84,12 @@ button {
 }
 
 .brand-mark {
-  display: grid;
   width: 42px;
   height: 42px;
-  place-items: center;
   border: 1px solid #cfd5dc;
   border-radius: 8px;
   background: var(--surface);
-  color: var(--accent-dark);
-  font-weight: 800;
+  object-fit: contain;
 }
 
 .brand strong,
