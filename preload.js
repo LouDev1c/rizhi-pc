@@ -1,8 +1,9 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('whbr', {
+  getAppIconUrl: () => ipcRenderer.invoke('app:getIconUrl'),
   getSystemTime: () => ipcRenderer.invoke('system:getTime'),
-  selectAndParseFile: () => ipcRenderer.invoke('file:selectAndParse'),
+  selectAndParseFile: (options) => ipcRenderer.invoke('file:selectAndParse', options),
   parseFilePath: (filePath) => ipcRenderer.invoke('file:parsePath', filePath),
   loadData: () => ipcRenderer.invoke('data:load'),
   saveData: (data) => ipcRenderer.invoke('data:save', data),

@@ -40,16 +40,35 @@ function extractTimeRange(text) {
 
 function extractTitle(rawText, startTime, endTime) {
   const rangePattern = new RegExp(
-    `${escapeClock(startTime)}\\s*[-~至—–]\\s*${escapeClock(endTime)}`
+    `${escapeClock(startTime)}\\s*[-~至—–]\\s*${escapeClock(endTime)}`,
+    'g'
   );
 
-  return String(rawText)
+  const title = String(rawText)
     .replace(rangePattern, '')
     .replace(/^\s*\d+\s+/, '')
     .replace(/\d{4}[-/.年]\d{1,2}[-/.月]\d{1,2}日?/, '')
     .replace(/周[一二三四五六日天]|星期[一二三四五六日天]/, '')
     .replace(/\s+/g, ' ')
     .trim();
+
+  return collapseRepeatedText(title);
+}
+
+function collapseRepeatedText(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+
+  for (let length = 2; length <= Math.floor(text.length / 2); length += 1) {
+    const chunk = text.slice(0, length).trim();
+    if (!chunk) continue;
+    const repeated = `${chunk}${chunk}`;
+    if (text.replace(/\s+/g, '') === repeated.replace(/\s+/g, '')) {
+      return chunk;
+    }
+  }
+
+  return text.replace(/^(.+?)\s+\1$/u, '$1').trim();
 }
 
 function extractDate(text) {

@@ -1,4 +1,6 @@
 const pageTitle = document.querySelector('#pageTitle');
+const appIconLink = document.querySelector('link[rel="icon"]');
+const brandMark = document.querySelector('.brand-mark');
 const systemTimeLabel = document.querySelector('.clock span');
 const systemTime = document.querySelector('#systemTime');
 const navItems = document.querySelectorAll('.nav-item');
@@ -237,7 +239,7 @@ async function importScheduleFile(kind = 'daily') {
   closeImportChoiceModal();
 
   try {
-    const selectedFile = await window.whbr.selectAndParseFile();
+    const selectedFile = await window.whbr.selectAndParseFile({ kind });
     if (selectedFile.canceled) {
       setStatus('已取消导入。', '', 2500);
       return;
@@ -253,6 +255,8 @@ async function importScheduleFile(kind = 'daily') {
       setStatus(result.error, '');
       return;
     }
+
+    if (!validateImportKind(result, kind)) return;
 
     await handleParsedImport(result, kind);
   } catch (error) {
@@ -279,6 +283,8 @@ async function importDroppedFile(file) {
     if (result.message) {
       setStatus(result.message, result.status === 'ok' ? 'hidden' : '');
     }
+
+    if (!validateImportKind(result, 'daily')) return;
 
     await handleParsedImport(result, 'daily');
   } catch (error) {
@@ -310,6 +316,42 @@ async function parseSelectedImportFile(file) {
   await waitForPaint();
 
   return result;
+}
+
+function validateImportKind(result, kind = 'daily') {
+  const importedTasks = Array.isArray(result.tasks) ? result.tasks : [];
+  const hasTimetable = hasImportedTimetable(result);
+  const isTable = result.sourceType === 'table';
+
+  if (kind === 'schedule') {
+    if (!isTable) {
+      setStatus('课表入口目前只支持表格文件，请选择 xlsx、xls、csv 或 tsv 文件。', '');
+      return false;
+    }
+
+    if (!hasTimetable) {
+      setStatus(importedTasks.length > 0
+        ? '这个文件看起来是每日安排，不是学期课表。请从“每日安排”的导入安排文件入口上传。'
+        : '没有识别到课表网格。请上传包含周一至周日列的课表表格文件。', '');
+      return false;
+    }
+
+    return true;
+  }
+
+  if (hasTimetable) {
+    setStatus('这个文件看起来是学期课表，不是每日安排。请从“课表”的导入课表表格入口上传。', '');
+    return false;
+  }
+
+  return true;
+}
+
+function hasImportedTimetable(result) {
+  const rows = result && result.timetableTemplate && Array.isArray(result.timetableTemplate.rows)
+    ? result.timetableTemplate.rows
+    : [];
+  return rows.length > 0;
 }
 
 function waitForPaint() {
@@ -397,7 +439,7 @@ async function confirmImportWithDateRange() {
 function openImportChoiceModal() {
   const hasSchedule = hasScheduleTemplate();
   manualScheduleButton.textContent = hasSchedule ? '查看/修改课表' : '手动添加课表';
-  fileScheduleButton.textContent = hasSchedule ? '更新课表文件' : '导入课表文件';
+  fileScheduleButton.textContent = hasSchedule ? '更新课表表格' : '导入课表表格';
   importChoiceModal.classList.remove('hidden');
 }
 
@@ -2082,6 +2124,7 @@ function clean(value) {
 }
 
 async function startApp() {
+  await applyAppIcon();
   const today = formatLocalDate(new Date());
   journalDate.value = today;
   taskDateFilter.value = today;
@@ -2090,6 +2133,19 @@ async function startApp() {
   await initializeAppData();
   await refreshSystemTime();
   setInterval(refreshSystemTime, 1000);
+}
+
+async function applyAppIcon() {
+  if (!window.whbr || typeof window.whbr.getAppIconUrl !== 'function') return;
+
+  try {
+    const iconUrl = await window.whbr.getAppIconUrl();
+    if (!iconUrl) return;
+    if (appIconLink) appIconLink.href = iconUrl;
+    if (brandMark) brandMark.src = iconUrl;
+  } catch (error) {
+    // Keep the static relative path as a development fallback.
+  }
 }
 
 startApp();

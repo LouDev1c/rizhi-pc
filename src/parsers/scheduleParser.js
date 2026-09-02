@@ -141,7 +141,7 @@ function rowToTask(row, mappings, index, context = {}) {
 
   if (!startTime || !endTime) return null;
 
-  const title = getCell(row, mappings.title) || extractTitle(rawText, startTime, endTime);
+  const title = cleanTaskTitle(getCell(row, mappings.title) || extractTitle(rawText, startTime, endTime), startTime, endTime);
   if (!isTaskLikeTitle(title)) return null;
   const date = normalizeParsedDate(getCell(row, mappings.date), context.fileYear)
     || normalizeParsedDate(extractDate(rawText), context.fileYear)
@@ -189,6 +189,40 @@ function isTaskLikeTitle(title) {
   if (/^[\d\s√✓×xX-]+$/.test(text)) return false;
   if (/^情况$|^序号$|^具体任务$|^时间线$/.test(text)) return false;
   return /[\u4e00-\u9fa5A-Za-z]/.test(text);
+}
+
+function cleanTaskTitle(value, startTime, endTime) {
+  const text = String(value || '')
+    .replace(taskTimeRangePattern(startTime, endTime), '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return collapseRepeatedText(text);
+}
+
+function taskTimeRangePattern(startTime, endTime) {
+  if (!startTime || !endTime) return /$^/g;
+  return new RegExp(`${clockPattern(startTime)}\\s*[-~至—–]\\s*${clockPattern(endTime)}`, 'g');
+}
+
+function clockPattern(clock) {
+  const [hour, minute] = String(clock).split(':');
+  return `0?${Number(hour)}\\s*[:：.]\\s*${minute}`;
+}
+
+function collapseRepeatedText(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+
+  for (let length = 2; length <= Math.floor(text.length / 2); length += 1) {
+    const chunk = text.slice(0, length).trim();
+    if (!chunk) continue;
+    if (text.replace(/\s+/g, '') === `${chunk}${chunk}`.replace(/\s+/g, '')) {
+      return chunk;
+    }
+  }
+
+  return text.replace(/^(.+?)\s+\1$/u, '$1').trim();
 }
 
 function extractSheetAnnotations(sheet, rows, tasks, context = {}) {

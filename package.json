@@ -24,8 +24,16 @@
     "files": [
       "main.js",
       "preload.js",
+      "rizhi.ico",
       "src/**/*",
       "package.json"
+    ],
+
+    "extraResources": [
+      {
+        "from": "rizhi.ico",
+        "to": "rizhi.ico"
+      }
     ],
 
     "asarUnpack": [

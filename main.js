@@ -1,12 +1,14 @@
 const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeImage, screen } = require('electron');
 const path = require('path');
+const { pathToFileURL } = require('url');
+const fsSync = require('fs');
 const fs = require('fs/promises');
 const { parseScheduleFile } = require('./src/parsers/scheduleParser');
 const { parseScheduleImage } = require('./src/parsers/imageScheduleParser');
 const { getStoragePaths, loadData, resetData, saveData, setDataPath, setSettingsPath } = require('./src/storage/localDataStore');
 
 const allowedExtensions = new Set(['.png', '.jpg', '.jpeg', '.csv', '.tsv', '.xlsx', '.xls']);
-const appIconPath = path.join(__dirname, 'rizhi.ico');
+const appIconPath = resolveAppIconPath();
 let mainWindow = null;
 let reminderWindow = null;
 let reminderCloseTimer = null;
@@ -93,7 +95,16 @@ function createTray() {
 
 function createTrayIcon() {
   const image = nativeImage.createFromPath(appIconPath);
-  return image.resize({ width: 16, height: 16 });
+  return image.isEmpty() ? nativeImage.createEmpty() : image.resize({ width: 16, height: 16 });
+}
+
+function resolveAppIconPath() {
+  const candidates = [
+    path.join(__dirname, 'rizhi.ico'),
+    path.join(process.resourcesPath || '', 'rizhi.ico')
+  ];
+
+  return candidates.find((candidate) => candidate && fsSync.existsSync(candidate)) || candidates[0];
 }
 
 function showMainWindow() {
@@ -259,15 +270,24 @@ ipcMain.handle('system:getTime', () => {
   };
 });
 
-ipcMain.handle('file:selectAndParse', async () => {
+ipcMain.handle('app:getIconUrl', () => {
+  return pathToFileURL(appIconPath).toString();
+});
+
+ipcMain.handle('file:selectAndParse', async (_event, options = {}) => {
+  const isScheduleImport = options && options.kind === 'schedule';
   const result = await dialog.showOpenDialog({
-    title: '选择课表图片或表格文件',
+    title: isScheduleImport ? '选择课表表格文件' : '选择每日安排图片或表格文件',
     properties: ['openFile'],
-    filters: [
-      { name: '课表图片或表格', extensions: ['png', 'jpg', 'jpeg', 'csv', 'tsv', 'xlsx', 'xls'] },
-      { name: '图片', extensions: ['png', 'jpg', 'jpeg'] },
-      { name: '表格', extensions: ['csv', 'tsv', 'xlsx', 'xls'] }
-    ]
+    filters: isScheduleImport
+      ? [
+          { name: '课表表格', extensions: ['csv', 'tsv', 'xlsx', 'xls'] }
+        ]
+      : [
+          { name: '每日安排图片或表格', extensions: ['png', 'jpg', 'jpeg', 'csv', 'tsv', 'xlsx', 'xls'] },
+          { name: '图片', extensions: ['png', 'jpg', 'jpeg'] },
+          { name: '表格', extensions: ['csv', 'tsv', 'xlsx', 'xls'] }
+        ]
   });
 
   if (result.canceled || result.filePaths.length === 0) {
