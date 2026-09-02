@@ -8,6 +8,9 @@
     "productName": "RiZhi",
     "win": {
       "icon": "rizhi.ico"
+    },
+    "nsis": {
+      "include": "build/installer.nsh"
     }
   },
   "scripts": {

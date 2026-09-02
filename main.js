@@ -319,7 +319,7 @@ ipcMain.handle('data:choosePath', async (_event, data) => {
 ipcMain.handle('data:chooseSettingsPath', async (_event, data) => {
   const result = await dialog.showSaveDialog({
     title: '选择 RiZhi 设置文件保存位置',
-    defaultPath: 'whbr-settings.json',
+    defaultPath: 'rizhi-settings.json',
     filters: [
       { name: 'RiZhi 设置文件', extensions: ['json'] },
       { name: 'JSON', extensions: ['json'] }

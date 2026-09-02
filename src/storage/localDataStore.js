@@ -2,11 +2,14 @@ const fs = require('fs/promises');
 const path = require('path');
 
 const LEGACY_DATA_FILE_NAME = 'whbr-data.json';
-const DATA_FILE_PREFIX = 'whbr-data-';
-const DATA_FILE_PATTERN = 'whbr-data-YYYY-MM.json';
-const DATA_FILE_REGEX = /^whbr-data-(\d{4}-\d{2})\.json$/;
-const SETTINGS_FILE_NAME = 'whbr-settings.json';
-const SETTINGS_LOCATION_FILE_NAME = 'whbr-settings-location.json';
+const LEGACY_MONTHLY_DATA_FILE_REGEX = /^whbr-data-(\d{4}-\d{2})\.json$/;
+const LEGACY_SETTINGS_FILE_NAME = 'whbr-settings.json';
+const LEGACY_SETTINGS_LOCATION_FILE_NAME = 'whbr-settings-location.json';
+const DATA_FILE_PREFIX = 'rizhi-data-';
+const DATA_FILE_PATTERN = 'rizhi-data-YYYY-MM.json';
+const DATA_FILE_REGEX = /^rizhi-data-(\d{4}-\d{2})\.json$/;
+const SETTINGS_FILE_NAME = 'rizhi-settings.json';
+const SETTINGS_LOCATION_FILE_NAME = 'rizhi-settings-location.json';
 
 function createDefaultData() {
   return {
@@ -26,8 +29,16 @@ function getDefaultSettingsPath(app) {
   return path.join(getDefaultMemoryDir(app), SETTINGS_FILE_NAME);
 }
 
+function getLegacyDefaultSettingsPath(app) {
+  return path.join(getDefaultMemoryDir(app), LEGACY_SETTINGS_FILE_NAME);
+}
+
 function getSettingsLocationPath(app) {
   return path.join(getDefaultMemoryDir(app), SETTINGS_LOCATION_FILE_NAME);
+}
+
+function getLegacySettingsLocationPath(app) {
+  return path.join(getDefaultMemoryDir(app), LEGACY_SETTINGS_LOCATION_FILE_NAME);
 }
 
 function getDefaultMemoryDir(app) {
@@ -36,6 +47,7 @@ function getDefaultMemoryDir(app) {
 }
 
 async function getDataDirectory(app) {
+  await migrateStorageNames(app);
   const settings = await readSettings(app);
   if (settings.dataDirectory) return settings.dataDirectory;
   if (settings.dataFilePath) return path.dirname(settings.dataFilePath);
@@ -51,6 +63,11 @@ function getMonthlyDataPath(dataDirectory, monthKey) {
 }
 
 async function getActiveSettingsPath(app) {
+  await migrateStorageNames(app);
+  return getActiveSettingsPathWithoutMigration(app);
+}
+
+async function getActiveSettingsPathWithoutMigration(app) {
   const locationPath = getSettingsLocationPath(app);
 
   try {
@@ -58,7 +75,15 @@ async function getActiveSettingsPath(app) {
     const location = JSON.parse(text);
     return location.settingsFilePath || getDefaultSettingsPath(app);
   } catch (error) {
-    return getDefaultSettingsPath(app);
+    try {
+      const text = await fs.readFile(getLegacySettingsLocationPath(app), 'utf8');
+      const location = JSON.parse(text);
+      return location.settingsFilePath || getLegacyDefaultSettingsPath(app);
+    } catch (legacyError) {
+      if (await fileExists(getDefaultSettingsPath(app))) return getDefaultSettingsPath(app);
+      if (await fileExists(getLegacyDefaultSettingsPath(app))) return getLegacyDefaultSettingsPath(app);
+      return getDefaultSettingsPath(app);
+    }
   }
 }
 
@@ -81,6 +106,7 @@ async function writeSettings(app, settings) {
 }
 
 async function loadData(app) {
+  await migrateStorageNames(app);
   const dataDirectory = await getDataDirectory(app);
   const settingsFilePath = await getActiveSettingsPath(app);
   const settings = await readSettings(app);
@@ -107,6 +133,7 @@ async function loadData(app) {
 }
 
 async function saveData(app, data) {
+  await migrateStorageNames(app);
   const dataDirectory = await getDataDirectory(app);
   const settingsFilePath = await getActiveSettingsPath(app);
   const normalized = normalizeData(data);
@@ -157,6 +184,7 @@ async function setSettingsPath(app, settingsFilePath, currentData) {
 }
 
 async function resetData(app) {
+  await migrateStorageNames(app);
   const dataDirectory = await getDataDirectory(app);
   const settingsFilePath = await getActiveSettingsPath(app);
   const settingsLocationPath = getSettingsLocationPath(app);
@@ -176,6 +204,7 @@ async function resetData(app) {
 }
 
 async function getStoragePaths(app) {
+  await migrateStorageNames(app);
   const dataDirectory = await getDataDirectory(app);
   const settingsFilePath = await getActiveSettingsPath(app);
   const monthlyFiles = await listMonthlyDataFiles(dataDirectory);
@@ -206,6 +235,96 @@ async function listMonthlyDataFiles(dataDirectory) {
   } catch (error) {
     if (error.code === 'ENOENT') return [];
     throw error;
+  }
+}
+
+let storageMigrationPromise = null;
+
+async function migrateStorageNames(app) {
+  if (!storageMigrationPromise) {
+    storageMigrationPromise = migrateStorageNamesOnce(app).catch((error) => {
+      storageMigrationPromise = null;
+      throw error;
+    });
+  }
+
+  return storageMigrationPromise;
+}
+
+async function migrateStorageNamesOnce(app) {
+  const defaultMemoryDir = getDefaultMemoryDir(app);
+  const oldDefaultSettingsPath = getLegacyDefaultSettingsPath(app);
+  const newDefaultSettingsPath = getDefaultSettingsPath(app);
+  const oldLocationPath = getLegacySettingsLocationPath(app);
+  const newLocationPath = getSettingsLocationPath(app);
+
+  await renameFileIfNeeded(oldDefaultSettingsPath, newDefaultSettingsPath);
+
+  let activeSettingsPath = await getActiveSettingsPathWithoutMigration(app);
+  if (path.basename(activeSettingsPath) === LEGACY_SETTINGS_FILE_NAME) {
+    const renamedSettingsPath = path.join(path.dirname(activeSettingsPath), SETTINGS_FILE_NAME);
+    await renameFileIfNeeded(activeSettingsPath, renamedSettingsPath);
+    activeSettingsPath = renamedSettingsPath;
+  }
+
+  let settings = {};
+  try {
+    settings = JSON.parse(await fs.readFile(activeSettingsPath, 'utf8'));
+  } catch (error) {
+    settings = {};
+  }
+
+  if (settings.settingsFilePath && path.basename(settings.settingsFilePath) === LEGACY_SETTINGS_FILE_NAME) {
+    const renamedSettingsPath = path.join(path.dirname(settings.settingsFilePath), SETTINGS_FILE_NAME);
+    await renameFileIfNeeded(settings.settingsFilePath, renamedSettingsPath);
+    settings.settingsFilePath = renamedSettingsPath;
+    activeSettingsPath = renamedSettingsPath;
+  }
+
+  const dataDirectory = settings.dataDirectory || (settings.dataFilePath ? path.dirname(settings.dataFilePath) : defaultMemoryDir);
+  if (settings.dataFilePath) {
+    settings.dataFilePath = undefined;
+  }
+
+  if (settings.settingsFilePath || settings.dataDirectory) {
+    await fs.mkdir(path.dirname(activeSettingsPath), { recursive: true });
+    await fs.writeFile(activeSettingsPath, JSON.stringify(settings, null, 2), 'utf8');
+  }
+
+  await fs.mkdir(defaultMemoryDir, { recursive: true });
+  await fs.writeFile(newLocationPath, JSON.stringify({ settingsFilePath: activeSettingsPath }, null, 2), 'utf8');
+  await removeFileIfExists(oldLocationPath, []);
+  await renameLegacyMonthlyDataFiles(dataDirectory);
+}
+
+async function renameLegacyMonthlyDataFiles(dataDirectory) {
+  try {
+    const entries = await fs.readdir(dataDirectory, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      const match = entry.name.match(LEGACY_MONTHLY_DATA_FILE_REGEX);
+      if (!match) continue;
+      const oldPath = path.join(dataDirectory, entry.name);
+      const newPath = path.join(dataDirectory, `${DATA_FILE_PREFIX}${match[1]}.json`);
+      await renameFileIfNeeded(oldPath, newPath);
+    }
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+}
+
+async function renameFileIfNeeded(oldPath, newPath) {
+  if (oldPath === newPath || !(await fileExists(oldPath)) || (await fileExists(newPath))) return;
+  await fs.mkdir(path.dirname(newPath), { recursive: true });
+  await fs.rename(oldPath, newPath);
+}
+
+async function fileExists(filePath) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch (error) {
+    return false;
   }
 }
 

@@ -1,0 +1,13 @@
+{
+  "profile": {
+    "focusLength": 50,
+    "breakReminder": true,
+    "classDuration": 45,
+    "classBreakLength": 10,
+    "workFocusLength": 50,
+    "workBreakLength": 10,
+    "timeMode": "system",
+    "customClockBaseTimestamp": 0,
+    "customClockStartedAt": 0
+  }
+}
