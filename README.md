@@ -9,12 +9,12 @@ RiZhi 是一个面向日程安排、课程表、每日记录和阶段提醒的�
 - 记录：按日期填写每日生活记录，也会尝试从表格文件中的记录内容或批注导入。
 - 设置：查看当前月份数据文件和设置文件路径，可选择数据文件夹；支持二次确认后删除某一天数据或重置全部软件数据。
 
-任务和记录会按月保存在本地 JSON 文件中。默认路径位于程序根目录下的 `memory` 文件夹：
+任务和记录会按月保存在本地 JSON 文件中。默认路径位于系统用户数据目录下的 `memory` 文件夹：
 
 ```text
-WHBR PC/memory/rizhi-data-YYYY-MM.json
-WHBR PC/memory/rizhi-settings.json
-WHBR PC/memory/rizhi-settings-location.json
+C:\Users\用户\AppData\Roaming\RiZhi\memory\rizhi-data-YYYY-MM.json
+C:\Users\用户\AppData\Roaming\RiZhi\memory\rizhi-settings.json
+C:\Users\用户\AppData\Roaming\RiZhi\memory\rizhi-settings-location.json
 ```
 
 其中：
@@ -39,7 +39,7 @@ WHBR PC/memory/rizhi-settings-location.json
 - 内部定位文件：保存自定义设置文件路径。
 - 旧版浏览器存储键：`whbr.tasks`、`whbr.journals`。
 
-打包为 Windows 安装包后，卸载 RiZhi 时会询问是否删除本地记录文件。选择“是”会删除安装目录下的 `memory` 文件夹；选择“否”会保留 `memory` 文件夹和其中的文件。
+打包为 Windows 安装包后，卸载 RiZhi 时会询问是否删除本地记录文件。选择“是”会删除 AppData/Roaming 下的 RiZhi `memory` 文件夹；选择“否”会保留 `memory` 文件夹和其中的文件。
 
 ## 文件解析
 

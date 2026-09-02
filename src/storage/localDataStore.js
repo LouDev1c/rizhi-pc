@@ -1,3 +1,4 @@
+const fsSync = require('fs');
 const fs = require('fs/promises');
 const path = require('path');
 
@@ -30,7 +31,7 @@ function getDefaultSettingsPath(app) {
 }
 
 function getLegacyDefaultSettingsPath(app) {
-  return path.join(getDefaultMemoryDir(app), LEGACY_SETTINGS_FILE_NAME);
+  return path.join(getLegacyInstallMemoryDir(app), LEGACY_SETTINGS_FILE_NAME);
 }
 
 function getSettingsLocationPath(app) {
@@ -38,12 +39,28 @@ function getSettingsLocationPath(app) {
 }
 
 function getLegacySettingsLocationPath(app) {
-  return path.join(getDefaultMemoryDir(app), LEGACY_SETTINGS_LOCATION_FILE_NAME);
+  return path.join(getLegacyInstallMemoryDir(app), LEGACY_SETTINGS_LOCATION_FILE_NAME);
 }
 
 function getDefaultMemoryDir(app) {
+  const userDataMemoryDir = path.join(app.getPath('userData'), 'memory');
+  if (canUseDirectory(userDataMemoryDir)) return userDataMemoryDir;
+  return getLegacyInstallMemoryDir(app);
+}
+
+function getLegacyInstallMemoryDir(app) {
   const appRoot = app.isPackaged ? path.dirname(process.execPath) : app.getAppPath();
   return path.join(appRoot, 'memory');
+}
+
+function canUseDirectory(directoryPath) {
+  try {
+    fsSync.mkdirSync(directoryPath, { recursive: true });
+    fsSync.accessSync(directoryPath, fsSync.constants.R_OK | fsSync.constants.W_OK);
+    return true;
+  } catch (error) {
+    return false;
+  }
 }
 
 async function getDataDirectory(app) {
@@ -253,14 +270,19 @@ async function migrateStorageNames(app) {
 
 async function migrateStorageNamesOnce(app) {
   const defaultMemoryDir = getDefaultMemoryDir(app);
+  const legacyInstallMemoryDir = getLegacyInstallMemoryDir(app);
   const oldDefaultSettingsPath = getLegacyDefaultSettingsPath(app);
   const newDefaultSettingsPath = getDefaultSettingsPath(app);
   const oldLocationPath = getLegacySettingsLocationPath(app);
   const newLocationPath = getSettingsLocationPath(app);
 
+  await migrateDefaultMemoryFiles(legacyInstallMemoryDir, defaultMemoryDir);
   await renameFileIfNeeded(oldDefaultSettingsPath, newDefaultSettingsPath);
 
   let activeSettingsPath = await getActiveSettingsPathWithoutMigration(app);
+  if (isLegacyDefaultSettingsPath(activeSettingsPath, legacyInstallMemoryDir) || (!(await fileExists(activeSettingsPath)) && (await fileExists(newDefaultSettingsPath)))) {
+    activeSettingsPath = newDefaultSettingsPath;
+  }
   if (path.basename(activeSettingsPath) === LEGACY_SETTINGS_FILE_NAME) {
     const renamedSettingsPath = path.join(path.dirname(activeSettingsPath), SETTINGS_FILE_NAME);
     await renameFileIfNeeded(activeSettingsPath, renamedSettingsPath);
@@ -280,6 +302,10 @@ async function migrateStorageNamesOnce(app) {
     settings.settingsFilePath = renamedSettingsPath;
     activeSettingsPath = renamedSettingsPath;
   }
+  if (settings.settingsFilePath && isLegacyDefaultSettingsPath(settings.settingsFilePath, legacyInstallMemoryDir)) {
+    settings.settingsFilePath = newDefaultSettingsPath;
+    activeSettingsPath = newDefaultSettingsPath;
+  }
 
   const dataDirectory = settings.dataDirectory || (settings.dataFilePath ? path.dirname(settings.dataFilePath) : defaultMemoryDir);
   if (settings.dataFilePath) {
@@ -287,14 +313,58 @@ async function migrateStorageNamesOnce(app) {
   }
 
   if (settings.settingsFilePath || settings.dataDirectory) {
-    await fs.mkdir(path.dirname(activeSettingsPath), { recursive: true });
-    await fs.writeFile(activeSettingsPath, JSON.stringify(settings, null, 2), 'utf8');
+    await writeJsonFileIfChanged(activeSettingsPath, settings);
   }
 
   await fs.mkdir(defaultMemoryDir, { recursive: true });
-  await fs.writeFile(newLocationPath, JSON.stringify({ settingsFilePath: activeSettingsPath }, null, 2), 'utf8');
+  await writeJsonFileIfChanged(newLocationPath, { settingsFilePath: activeSettingsPath });
   await removeFileIfExists(oldLocationPath, []);
   await renameLegacyMonthlyDataFiles(dataDirectory);
+}
+
+async function migrateDefaultMemoryFiles(oldMemoryDir, newMemoryDir) {
+  if (oldMemoryDir === newMemoryDir) return;
+
+  await moveFileIfNeeded(
+    path.join(oldMemoryDir, LEGACY_SETTINGS_FILE_NAME),
+    path.join(newMemoryDir, SETTINGS_FILE_NAME)
+  );
+  await moveFileIfNeeded(
+    path.join(oldMemoryDir, SETTINGS_FILE_NAME),
+    path.join(newMemoryDir, SETTINGS_FILE_NAME)
+  );
+  await moveFileIfNeeded(
+    path.join(oldMemoryDir, LEGACY_DATA_FILE_NAME),
+    path.join(newMemoryDir, LEGACY_DATA_FILE_NAME)
+  );
+
+  try {
+    const entries = await fs.readdir(oldMemoryDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+
+      const legacyMonthlyMatch = entry.name.match(LEGACY_MONTHLY_DATA_FILE_REGEX);
+      if (legacyMonthlyMatch) {
+        await moveFileIfNeeded(
+          path.join(oldMemoryDir, entry.name),
+          path.join(newMemoryDir, `${DATA_FILE_PREFIX}${legacyMonthlyMatch[1]}.json`)
+        );
+        continue;
+      }
+
+      if (DATA_FILE_REGEX.test(entry.name)) {
+        await moveFileIfNeeded(path.join(oldMemoryDir, entry.name), path.join(newMemoryDir, entry.name));
+      }
+    }
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+}
+
+function isLegacyDefaultSettingsPath(settingsPath, legacyMemoryDir) {
+  const normalized = path.normalize(settingsPath || '');
+  return normalized === path.normalize(path.join(legacyMemoryDir, LEGACY_SETTINGS_FILE_NAME))
+    || normalized === path.normalize(path.join(legacyMemoryDir, SETTINGS_FILE_NAME));
 }
 
 async function renameLegacyMonthlyDataFiles(dataDirectory) {
@@ -316,7 +386,38 @@ async function renameLegacyMonthlyDataFiles(dataDirectory) {
 async function renameFileIfNeeded(oldPath, newPath) {
   if (oldPath === newPath || !(await fileExists(oldPath)) || (await fileExists(newPath))) return;
   await fs.mkdir(path.dirname(newPath), { recursive: true });
-  await fs.rename(oldPath, newPath);
+  try {
+    await fs.rename(oldPath, newPath);
+  } catch (error) {
+    if (error.code !== 'EXDEV') throw error;
+    await fs.copyFile(oldPath, newPath);
+    await fs.unlink(oldPath);
+  }
+}
+
+async function moveFileIfNeeded(oldPath, newPath) {
+  return renameFileIfNeeded(oldPath, newPath);
+}
+
+async function writeJsonFileIfChanged(filePath, data) {
+  const text = JSON.stringify(data, null, 2);
+  try {
+    const existing = await fs.readFile(filePath, 'utf8');
+    if (existing === text) return;
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      if (error.code === 'EPERM' || error.code === 'EACCES') return;
+      throw error;
+    }
+  }
+
+  try {
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, text, 'utf8');
+  } catch (error) {
+    if ((error.code === 'EPERM' || error.code === 'EACCES') && (await fileExists(filePath))) return;
+    throw error;
+  }
 }
 
 async function fileExists(filePath) {
