@@ -6,6 +6,7 @@ const fs = require('fs/promises');
 const { parseScheduleFile } = require('./src/parsers/scheduleParser');
 const { parseScheduleImage } = require('./src/parsers/imageScheduleParser');
 const { getStoragePaths, loadData, resetData, saveData, setDataPath, setSettingsPath } = require('./src/storage/localDataStore');
+const { autoUpdater } = require('electron-updater');
 
 const allowedExtensions = new Set(['.png', '.jpg', '.jpeg', '.csv', '.tsv', '.xlsx', '.xls']);
 const appIconPath = resolveAppIconPath();
@@ -72,9 +73,58 @@ function createWindow() {
   });
 }
 
+function setupAutoUpdater() {
+  if (!app.isPackaged) {
+    return;
+  }
+
+  autoUpdater.autoDownload = true;
+
+  autoUpdater.on('checking-for-update', () => {
+    console.log('RiZhi: checking for updates...');
+  });
+
+  autoUpdater.on('update-available', (info) => {
+    console.log(`RiZhi: update available: ${info.version}`);
+  });
+
+  autoUpdater.on('update-not-available', () => {
+    console.log('RiZhi: already up to date.');
+  });
+
+  autoUpdater.on('download-progress', (progress) => {
+    console.log(
+      `RiZhi: update download ${progress.percent.toFixed(1)}%`
+    );
+  });
+
+  autoUpdater.on('update-downloaded', async (info) => {
+    const result = await dialog.showMessageBox({
+      type: 'info',
+      title: '日织更新',
+      message: `新版本 ${info.version} 已下载完成`,
+      detail: '是否立即重启日织并完成更新？',
+      buttons: ['立即更新', '稍后'],
+      defaultId: 0,
+      cancelId: 1
+    });
+
+    if (result.response === 0) {
+      autoUpdater.quitAndInstall();
+    }
+  });
+
+  autoUpdater.on('error', (error) => {
+    console.error('RiZhi updater error:', error);
+  });
+
+  autoUpdater.checkForUpdates();
+}
+
 app.whenReady().then(() => {
   createWindow();
   createTray();
+  setupAutoUpdater();
 
   app.on('activate', () => {
     if (!mainWindow || mainWindow.isDestroyed()) createWindow();
@@ -292,6 +342,10 @@ ipcMain.handle('system:getTime', () => {
 
 ipcMain.handle('app:getIconUrl', () => {
   return pathToFileURL(appIconPath).toString();
+});
+
+ipcMain.handle('app:getVersion', () => {
+  return app.getVersion();
 });
 
 ipcMain.handle('file:selectAndParse', async (_event, options = {}) => {

@@ -209,6 +209,20 @@ h2 {
   height: 42px;
 }
 
+.version-badge {
+  position: fixed;
+  right: 18px;
+  bottom: 12px;
+  z-index: 4;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.76);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+  pointer-events: none;
+}
+
 .page {
   display: none;
 }

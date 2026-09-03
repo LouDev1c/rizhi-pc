@@ -103,6 +103,7 @@ const tutorialText = document.querySelector('#tutorialText');
 const tutorialPrevButton = document.querySelector('#tutorialPrevButton');
 const tutorialNextButton = document.querySelector('#tutorialNextButton');
 const tutorialCloseButton = document.querySelector('#tutorialCloseButton');
+const versionBadge = document.querySelector('#versionBadge');
 
 let tasks = [];
 let journals = [];
@@ -2265,6 +2266,7 @@ function clean(value) {
 
 async function startApp() {
   await applyAppIcon();
+  await applyAppVersion();
   const today = formatLocalDate(new Date());
   journalDate.value = today;
   taskDateFilter.value = today;
@@ -2285,6 +2287,17 @@ async function applyAppIcon() {
     if (brandMark) brandMark.src = iconUrl;
   } catch (error) {
     // Keep the static relative path as a development fallback.
+  }
+}
+
+async function applyAppVersion() {
+  if (!versionBadge || !window.whbr || typeof window.whbr.getAppVersion !== 'function') return;
+
+  try {
+    const version = await window.whbr.getAppVersion();
+    versionBadge.textContent = version ? `版本 v${version}` : '版本 --';
+  } catch (error) {
+    versionBadge.textContent = '版本 --';
   }
 }
 
