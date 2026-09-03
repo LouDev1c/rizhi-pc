@@ -377,6 +377,19 @@ ipcMain.handle('app:getVersion', () => {
   return app.getVersion();
 });
 
+ipcMain.handle('dialog:messageBox', async (_event, options = {}) => {
+  return dialog.showMessageBox(mainWindow || undefined, {
+    type: options.type || 'question',
+    title: options.title || '日织',
+    message: options.message || '',
+    detail: options.detail || '',
+    buttons: Array.isArray(options.buttons) && options.buttons.length ? options.buttons : ['确定'],
+    defaultId: Number.isInteger(options.defaultId) ? options.defaultId : 0,
+    cancelId: Number.isInteger(options.cancelId) ? options.cancelId : 0,
+    noLink: options.noLink !== false
+  });
+});
+
 ipcMain.handle('file:selectAndParse', async (_event, options = {}) => {
   const isScheduleImport = options && options.kind === 'schedule';
   const extensions = isScheduleImport ? scheduleFileExtensions : dailyFileExtensions;

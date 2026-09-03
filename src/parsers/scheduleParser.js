@@ -168,11 +168,13 @@ function buildResult(rows, context = {}) {
     if (journal) journals.push(journal);
   });
 
+  const collapsedTasks = collapseTasksByTime(tasks);
+
   return {
-    tasks,
+    tasks: collapsedTasks,
     journals,
     status: 'ok',
-    message: `已解析出 ${tasks.length} 条安排`
+    message: `已解析出 ${collapsedTasks.length} 条安排`
   };
 }
 
@@ -192,7 +194,10 @@ function rowToTask(row, mappings, index, context = {}) {
 
   if (!startTime || !endTime) return null;
 
-  const title = cleanTaskTitle(getCell(row, mappings.title) || extractTitle(rawText, startTime, endTime), startTime, endTime);
+  const titleSource = getCell(row, mappings.title)
+    || (timeRangeCell ? extractTitle(timeRangeCell, startTime, endTime) : '')
+    || extractTitle(rawText, startTime, endTime);
+  const title = cleanTaskTitle(titleSource, startTime, endTime);
   if (!isTaskLikeTitle(title)) return null;
   const date = normalizeParsedDate(getCell(row, mappings.date), context.fileYear)
     || normalizeParsedDate(extractDate(rawText), context.fileYear)
@@ -208,6 +213,9 @@ function rowToTask(row, mappings, index, context = {}) {
     weekday: getCell(row, mappings.weekday) || weekdayFromDate(date),
     location: getCell(row, mappings.location),
     type: getCell(row, mappings.type) || guessType(title),
+    planDetails: getCell(row, mappings.planDetails),
+    details: '',
+    status: '未评价',
     rawText,
     sheetName: context.sheetName || '',
     rowIndex: context.rowIndex
@@ -232,6 +240,32 @@ function rowToJournal(row, mappings, index, context = {}) {
     content: rawText,
     source: 'table-cell'
   };
+}
+
+function collapseTasksByTime(taskItems) {
+  const taskMap = new Map();
+
+  taskItems.forEach((task) => {
+    const key = [
+      normalizeParsedDate(task.date),
+      task.sheetName || '',
+      task.startTime,
+      task.endTime
+    ].join('|');
+    const current = taskMap.get(key);
+    if (!current) {
+      taskMap.set(key, task);
+      return;
+    }
+
+    if (String(task.title || '').length > String(current.title || '').length) {
+      current.title = task.title;
+    }
+    current.planDetails = appendText(current.planDetails, task.planDetails);
+    current.rawText = appendText(current.rawText, task.rawText);
+  });
+
+  return Array.from(taskMap.values());
 }
 
 function isTaskLikeTitle(title) {
@@ -291,8 +325,6 @@ function extractSheetAnnotations(sheet, rows, tasks, context = {}) {
     if (relatedTask && kind !== 'journal') {
       if (kind === 'plan') {
         relatedTask.planDetails = appendText(relatedTask.planDetails, comment.text);
-      } else {
-        relatedTask.details = appendText(relatedTask.details, comment.text);
       }
       return;
     }
@@ -440,7 +472,8 @@ function findHeaderIndex(rows) {
 function mapHeader(header) {
   return header.reduce((acc, cell, index) => {
     const label = String(cell).toLowerCase();
-    if (/课程|任务|事项|内容|名称|title|subject|course|task/.test(label)) acc.title = index;
+    if (/具体任务|任务目标|任务详情|事前|计划|plan/.test(label)) acc.planDetails = index;
+    if (/课程|任务|事项|内容|名称|title|subject|course|task/.test(label) && acc.planDetails !== index) acc.title = index;
     if (/开始|start/.test(label)) acc.startTime = index;
     if (/结束|end/.test(label)) acc.endTime = index;
     if (/日期|date/.test(label)) acc.date = index;

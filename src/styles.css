@@ -483,9 +483,18 @@ h2 {
   background: #ffffff;
 }
 
+.task-card.task-time-conflict {
+  border-color: #ef9a9a;
+  background: #fff7f7;
+}
+
 .task-time {
   color: var(--text);
   font-weight: 760;
+}
+
+.task-time.task-time-conflict-text {
+  color: #b91c1c;
 }
 
 .task-time-editor {
@@ -524,6 +533,18 @@ h2 {
   min-width: 76px;
   padding: 0 2px;
   font-weight: 760;
+}
+
+.task-time-editor .inline-field.time-conflict,
+.editable-table input.time-conflict {
+  border-color: #dc2626;
+  background: #fff1f2;
+  color: #b91c1c;
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.12);
+}
+
+.schedule-row-conflict {
+  background: #fff7f7;
 }
 
 .time-input {
@@ -961,7 +982,7 @@ h2 {
 
 .journal-task-detail {
   display: grid;
-  gap: 4px;
+  gap: 10px;
   margin-top: 10px;
   padding: 10px 12px;
   border: 1px solid #dfe3e8;
@@ -969,12 +990,17 @@ h2 {
   background: #ffffff;
 }
 
-.journal-task-detail span {
+.journal-task-field {
+  display: grid;
+  gap: 4px;
+}
+
+.journal-task-field span {
   color: var(--muted);
   font-size: 13px;
 }
 
-.journal-task-detail p {
+.journal-task-field p {
   margin-bottom: 0;
 }
 

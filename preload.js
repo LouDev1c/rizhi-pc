@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld('whbr', {
   getAppIconUrl: () => ipcRenderer.invoke('app:getIconUrl'),
   getAppVersion: () => ipcRenderer.invoke('app:getVersion'),
   getSystemTime: () => ipcRenderer.invoke('system:getTime'),
+  showMessageBox: (options) => ipcRenderer.invoke('dialog:messageBox', options),
   selectAndParseFile: (options) => ipcRenderer.invoke('file:selectAndParse', options),
   parseFilePath: (filePath) => ipcRenderer.invoke('file:parsePath', filePath),
   loadData: () => ipcRenderer.invoke('data:load'),

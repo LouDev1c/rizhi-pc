@@ -496,7 +496,7 @@ async function parseSelectedImportFile(file, kind = 'daily') {
   if (isScheduleUnsupported) {
     return {
       canceled: false,
-      error: '课表入口目前只支持 xlsx、xls、csv 或 tsv 文件。PDF 课表暂不在 v0.1.2 支持范围内。',
+      error: '课表入口目前只支持 xlsx、xls、csv 或 tsv 文件。PDF 课表暂不在 v0.1.3 支持范围内。',
       filePath: file.filePath,
       fileName,
       tasks: []
@@ -569,13 +569,19 @@ function waitForPaint() {
 
 async function handleParsedImport(result, kind = 'daily') {
   const importedTasks = Array.isArray(result.tasks) ? result.tasks : [];
+  const importedJournals = Array.isArray(result.journals) ? result.journals : [];
   if (kind === 'schedule') {
     openScheduleTableModal(result.timetableTemplate || templateFromScheduleTasks(importedTasks), result);
     return;
   }
 
   if (importedTasks.length === 0) {
-    journals = mergeJournals(journals, result.journals || []);
+    const resolvedJournals = await resolveImportedJournals(importedJournals);
+    if (resolvedJournals === null) {
+      setStatus('已取消导入。', '', 2500);
+      return;
+    }
+    journals = resolvedJournals;
     await saveState();
     renderAll();
     return;
@@ -587,10 +593,22 @@ async function handleParsedImport(result, kind = 'daily') {
     return;
   }
 
-  tasks = mergeTasks(tasks, importedTasks);
-  journals = mergeJournals(journals, result.journals || []);
+  const resolvedTasks = await resolveImportedTasks(importedTasks);
+  if (resolvedTasks === null) {
+    setStatus('已取消导入。', '', 2500);
+    return;
+  }
+
+  const resolvedJournals = await resolveImportedJournals(importedJournals);
+  if (resolvedJournals === null) {
+    setStatus('已取消导入。', '', 2500);
+    return;
+  }
+  tasks = resolvedTasks.tasks;
+  journals = resolvedJournals;
   await saveState();
   renderAll();
+  setStatus(`已导入 ${resolvedTasks.importedCount} 条安排。`, 'hidden');
 }
 
 function shouldAskImportDateRange(result, importedTasks) {
@@ -632,14 +650,28 @@ async function confirmImportWithDateRange() {
   }
 
   const expandedTasks = expandTasksAcrossDates(pendingImportResult.tasks || [], dates);
-  tasks = mergeTasks(tasks, expandedTasks);
-  journals = mergeJournals(journals, pendingImportResult.journals || []);
+  const resolvedTasks = await resolveImportedTasks(expandedTasks);
+  if (resolvedTasks === null) {
+    closeImportDateModal();
+    setStatus('已取消导入。', '', 2500);
+    return;
+  }
+
+  const resolvedJournals = await resolveImportedJournals(pendingImportResult.journals || []);
+  if (resolvedJournals === null) {
+    closeImportDateModal();
+    setStatus('已取消导入。', '', 2500);
+    return;
+  }
+
+  tasks = resolvedTasks.tasks;
+  journals = resolvedJournals;
   taskDateFilter.value = dates[0];
   activePlanningDates.add(dates[0]);
   await saveState();
   closeImportDateModal();
   renderAll();
-  setStatus(`已导入 ${expandedTasks.length} 条安排，日期范围 ${dates[0]} 至 ${dates[dates.length - 1]}。`, 'hidden');
+  setStatus(`已导入 ${resolvedTasks.importedCount} 条安排，日期范围 ${dates[0]} 至 ${dates[dates.length - 1]}。`, 'hidden');
 }
 
 function openImportChoiceModal() {
@@ -848,6 +880,12 @@ async function saveScheduleTable() {
   }
 
   const template = readScheduleTemplateFromTable();
+  const conflictedRows = markScheduleTimeConflicts(template.rows);
+  if (conflictedRows.size > 0) {
+    setStatus('课表时间段存在重叠冲突，已标红对应行。请修改后再生成课程安排。', '');
+    return;
+  }
+
   const newTasks = buildTasksFromScheduleTemplate(template, dates);
 
   if (template.rows.length === 0) {
@@ -866,6 +904,21 @@ async function saveScheduleTable() {
   closeScheduleTableModal();
   renderAll();
   setStatus(`已生成 ${newTasks.length} 条课程安排。`, 'hidden');
+}
+
+function markScheduleTimeConflicts(rows) {
+  const conflictedIndexes = findConflictingRangeIndexes(rows);
+  Array.from(scheduleTableBody.querySelectorAll('tr')).forEach((row, index) => {
+    const input = row.querySelector('input[data-role="schedule-time"]');
+    if (!input) return;
+    const conflicted = conflictedIndexes.has(index);
+    input.classList.toggle('time-conflict', conflicted);
+    row.classList.toggle('schedule-row-conflict', conflicted);
+    input.title = conflicted
+      ? '这个时间段与课表中的其他时间段冲突，请修改后再生成课程安排。'
+      : input.dataset.sectionLabel ? `${input.dataset.sectionLabel}，请填写具体时间，如 08:00-09:40` : '请填写具体时间，如 08:00-09:40';
+  });
+  return conflictedIndexes;
 }
 
 function openDailyPlanTableModal() {
@@ -981,24 +1034,33 @@ function renderTasks() {
   taskList.innerHTML = '';
 
   const sortedTasks = sortTasksForDisplay(visibleTasks);
+  const conflictingTaskIds = findConflictingTaskIds(sortedTasks);
 
   sortedTasks.forEach((task) => {
     const card = document.createElement('article');
     card.className = 'task-card';
+    const hasTimeConflict = conflictingTaskIds.has(task.id);
+    if (hasTimeConflict) {
+      card.classList.add('task-time-conflict');
+      card.title = '这个时间段与同一天的其他任务冲突，请修改开始或结束时间。';
+    }
     card.dataset.taskId = task.id;
     card.addEventListener('dragover', handleTaskDragOver);
     card.addEventListener('drop', handleTaskDrop);
 
     const time = document.createElement('div');
     time.className = 'task-time task-time-editor';
+    time.classList.toggle('task-time-conflict-text', hasTimeConflict);
     const startInput = createInlineInput('time', task.startTime, '开始时间');
     startInput.classList.add('time-input');
-    startInput.addEventListener('change', () => updateTaskField(task.id, 'startTime', startInput.value));
+    startInput.classList.toggle('time-conflict', hasTimeConflict);
     const separator = document.createElement('span');
     separator.textContent = '-';
     const endInput = createInlineInput('time', task.endTime, '结束时间');
     endInput.classList.add('time-input');
-    endInput.addEventListener('change', () => updateTaskField(task.id, 'endTime', endInput.value));
+    endInput.classList.toggle('time-conflict', hasTimeConflict);
+    startInput.addEventListener('blur', () => updateTaskField(task.id, 'startTime', startInput.value));
+    endInput.addEventListener('blur', () => updateTaskField(task.id, 'endTime', endInput.value));
     time.append(startInput, separator, endInput);
 
     const body = document.createElement('div');
@@ -1554,6 +1616,67 @@ function timeToMinutes(value) {
   return hours * 60 + minutes;
 }
 
+function findConflictingTaskIds(taskItems) {
+  const conflicted = new Set();
+  const byDate = new Map();
+
+  taskItems.forEach((task) => {
+    const date = normalizeDate(task.date);
+    if (!date) return;
+    if (!byDate.has(date)) byDate.set(date, []);
+    byDate.get(date).push(task);
+  });
+
+  byDate.forEach((dayTasks) => {
+    const indexes = findConflictingRangeIndexes(dayTasks);
+    indexes.forEach((index) => {
+      if (dayTasks[index] && dayTasks[index].id) conflicted.add(dayTasks[index].id);
+    });
+  });
+
+  return conflicted;
+}
+
+function findConflictingRangeIndexes(items) {
+  const conflicted = new Set();
+  const ranges = items.map((item, index) => ({
+    index,
+    intervals: item.startTime || item.endTime
+      ? rangeToComparableIntervals(item.startTime, item.endTime)
+      : inputRangeToComparableIntervals(item.timeRange)
+  })).filter((item) => item.intervals.length > 0);
+
+  for (let firstIndex = 0; firstIndex < ranges.length; firstIndex += 1) {
+    for (let secondIndex = firstIndex + 1; secondIndex < ranges.length; secondIndex += 1) {
+      if (!rangesOverlap(ranges[firstIndex].intervals, ranges[secondIndex].intervals)) continue;
+      conflicted.add(ranges[firstIndex].index);
+      conflicted.add(ranges[secondIndex].index);
+    }
+  }
+
+  return conflicted;
+}
+
+function inputRangeToComparableIntervals(value) {
+  const timeRange = extractTimeRangeFromInput(value);
+  if (!timeRange) return [];
+  return rangeToComparableIntervals(timeRange.startTime, timeRange.endTime);
+}
+
+function rangeToComparableIntervals(startTime, endTime) {
+  const start = timeToMinutes(startTime);
+  const end = timeToMinutes(endTime);
+  if (start === null || end === null || start === end) return [];
+  if (end > start) return [[start, end], [start + 1440, end + 1440]];
+  return [[start, end + 1440], [start - 1440, end]];
+}
+
+function rangesOverlap(firstIntervals, secondIntervals) {
+  return firstIntervals.some(([firstStart, firstEnd]) => (
+    secondIntervals.some(([secondStart, secondEnd]) => firstStart < secondEnd && secondStart < firstEnd)
+  ));
+}
+
 function nextOrderForDate(date, counters = null) {
   const normalizedDate = normalizeDate(date);
   const counterKey = normalizedDate || '__all__';
@@ -1579,6 +1702,134 @@ function ensureSelectedDate() {
   }
 
   return clean(taskDateFilter.value);
+}
+
+async function resolveImportedTasks(importedTasks) {
+  const validTasks = importedTasks.filter((task) => {
+    return normalizeDate(task.date) && clean(task.title) && timeToMinutes(task.startTime) !== null && timeToMinutes(task.endTime) !== null;
+  });
+  if (validTasks.length === 0) {
+    return {
+      tasks,
+      importedCount: 0
+    };
+  }
+
+  const conflicts = findImportTaskConflicts(tasks, validTasks);
+  if (conflicts.importedIds.size === 0) {
+    return {
+      tasks: mergeTasks(tasks, validTasks),
+      importedCount: validTasks.length
+    };
+  }
+
+  const result = await window.whbr.showMessageBox({
+    type: 'question',
+    title: '任务时间冲突',
+    message: `导入安排中有 ${conflicts.importedIds.size} 条与已有任务时间重叠，是否更新？`,
+    detail: `${formatImportConflictSummary(conflicts)}\n\n选择“更新”会删除已有的冲突任务，并写入导入任务；选择“保留原来的”会跳过导入中冲突的任务。`,
+    buttons: ['更新', '保留原来的', '取消导入'],
+    defaultId: 1,
+    cancelId: 2,
+    noLink: true
+  });
+
+  if (result.response === 2) return null;
+
+  if (result.response === 1) {
+    const filteredImportedTasks = validTasks.filter((task) => !conflicts.importedIds.has(task.id));
+    return {
+      tasks: mergeTasks(tasks, filteredImportedTasks),
+      importedCount: filteredImportedTasks.length
+    };
+  }
+
+  const updatedTasks = tasks.filter((task) => !conflicts.existingIds.has(task.id));
+  return {
+    tasks: mergeTasks(updatedTasks, validTasks),
+    importedCount: validTasks.length
+  };
+}
+
+function findImportTaskConflicts(existingTasks, importedTasks) {
+  const existingIds = new Set();
+  const importedIds = new Set();
+  const pairs = [];
+
+  importedTasks.forEach((importedTask) => {
+    const importedDate = normalizeDate(importedTask.date);
+    const importedIntervals = rangeToComparableIntervals(importedTask.startTime, importedTask.endTime);
+    if (!importedDate || importedIntervals.length === 0) return;
+
+    existingTasks.forEach((existingTask) => {
+      if (!existingTask.id || normalizeDate(existingTask.date) !== importedDate || !isRenderableTask(existingTask)) return;
+      const existingIntervals = rangeToComparableIntervals(existingTask.startTime, existingTask.endTime);
+      if (existingIntervals.length === 0 || !rangesOverlap(importedIntervals, existingIntervals)) return;
+
+      existingIds.add(existingTask.id);
+      importedIds.add(importedTask.id);
+      pairs.push({ date: importedDate, existingTask, importedTask });
+    });
+  });
+
+  return { existingIds, importedIds, pairs };
+}
+
+function formatImportConflictSummary(conflicts) {
+  const lines = conflicts.pairs.slice(0, 5).map(({ date, existingTask, importedTask }) => {
+    return `${date}：已有「${formatTaskBrief(existingTask)}」/ 导入「${formatTaskBrief(importedTask)}」`;
+  });
+  if (conflicts.pairs.length > 5) lines.push(`另有 ${conflicts.pairs.length - 5} 处冲突`);
+  return lines.join('\n');
+}
+
+function formatTaskBrief(task) {
+  return `${task.startTime || '--:--'}-${task.endTime || '--:--'} ${clean(task.title) || '未命名安排'}`;
+}
+
+async function resolveImportedJournals(importedJournals) {
+  const validJournals = importedJournals.filter((journal) => clean(journal.content) && journalPrimaryDate(journal));
+  if (validJournals.length === 0) return journals;
+
+  const conflictedDates = journalConflictDates(journals, validJournals);
+  if (conflictedDates.length === 0) return mergeJournals(journals, validJournals);
+
+  const result = await window.whbr.showMessageBox({
+    type: 'question',
+    title: '每日记录已存在',
+    message: `已存在 ${conflictedDates.length} 天的每日记录，如何处理？`,
+    detail: `冲突日期：${conflictedDates.slice(0, 8).join('、')}${conflictedDates.length > 8 ? ' 等' : ''}`,
+    buttons: ['覆盖', '保留原来的', '取消上传'],
+    defaultId: 1,
+    cancelId: 2,
+    noLink: true
+  });
+
+  if (result.response === 2) return null;
+
+  if (result.response === 1) {
+    return mergeJournals(journals, validJournals.filter((journal) => {
+      return !journalDates(journal).some((date) => conflictedDates.includes(date));
+    }));
+  }
+
+  const importDates = new Set(validJournals.flatMap(journalDates));
+  const withoutConflicted = journals.filter((journal) => {
+    return !journalDates(journal).some((date) => importDates.has(date));
+  });
+  return mergeJournals(withoutConflicted, validJournals);
+}
+
+function journalConflictDates(currentJournals, importedJournals) {
+  const currentDates = new Set(currentJournals.flatMap(journalDates));
+  return Array.from(new Set(importedJournals.flatMap(journalDates).filter((date) => currentDates.has(date)))).sort();
+}
+
+function journalDates(journal) {
+  const { start, end } = journalDateRange(journal);
+  if (!start) return [];
+  if (!end || start === end) return [start];
+  return enumerateDates(start, end);
 }
 
 function mergeJournals(currentJournals, importedJournals) {
@@ -1715,17 +1966,29 @@ function renderJournalView(journal, targetDate, fallbackTitle) {
       item.className = 'journal-task-detail';
       const title = document.createElement('strong');
       title.textContent = `${task.startTime || '--:--'} - ${task.endTime || '--:--'} ${task.title || '未命名安排'}`;
-      const status = document.createElement('span');
-      status.textContent = `完成情况：${task.status || '未评价'}`;
-      const details = document.createElement('p');
-      details.textContent = task.details || '没有填写反思内容。';
-      item.append(title, status, details);
+      item.append(
+        title,
+        createJournalTaskField('任务目标', task.planDetails || '没有填写任务目标。'),
+        createJournalTaskField('具体完成内容及反思', task.details || '没有填写完成内容及反思。'),
+        createJournalTaskField('完成情况', task.status || '未评价')
+      );
       taskSection.appendChild(item);
     });
   }
 
   journalViewContent.appendChild(taskSection);
   journalViewModal.classList.remove('hidden');
+}
+
+function createJournalTaskField(label, value) {
+  const field = document.createElement('div');
+  field.className = 'journal-task-field';
+  const labelElement = document.createElement('span');
+  labelElement.textContent = label;
+  const valueElement = document.createElement('p');
+  valueElement.textContent = value;
+  field.append(labelElement, valueElement);
+  return field;
 }
 
 function findJournalForDate(normalizedDate, rawDate) {
@@ -1764,8 +2027,7 @@ function normalizeTime(value) {
 }
 
 function journalIdentity(journal) {
-  const { start, end } = journalDateRange(journal);
-  return [start, end, clean(journal.sheetName), clean(journal.id)].filter(Boolean).join('|');
+  return journalPrimaryDate(journal);
 }
 
 function compareJournals(a, b) {
@@ -2031,7 +2293,7 @@ function defaultProfile() {
     classBreakLength: 10,
     workFocusLength: 50,
     workBreakLength: 10,
-    defaultsVersion: '0.1.2'
+    defaultsVersion: '0.1.3'
   };
 }
 
@@ -2107,7 +2369,7 @@ async function initializeAppData() {
 function migrateProfileDefaults(profileData) {
   const migrated = { ...profileData };
   let changed = false;
-  if (migrated.defaultsVersion !== '0.1.2') {
+  if (migrated.defaultsVersion !== '0.1.3') {
     if (Number(migrated.classDuration) === 45) {
       migrated.classDuration = 50;
       changed = true;
@@ -2120,7 +2382,7 @@ function migrateProfileDefaults(profileData) {
       migrated.focusLength = 50;
       changed = true;
     }
-    migrated.defaultsVersion = '0.1.2';
+    migrated.defaultsVersion = '0.1.3';
     changed = true;
   }
   return { profile: migrated, changed };
