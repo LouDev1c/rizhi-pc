@@ -14,18 +14,14 @@ RiZhi 是一个面向日程安排、课程表、每日记录和阶段提醒的�
 ```text
 C:\Users\用户\AppData\Roaming\RiZhi\memory\rizhi-data-YYYY-MM.json
 C:\Users\用户\AppData\Roaming\RiZhi\memory\rizhi-settings.json
-C:\Users\用户\AppData\Roaming\RiZhi\memory\rizhi-settings-location.json
 ```
 
 其中：
 
 - `rizhi-data-YYYY-MM.json`：保存对应月份的任务安排和每日记录。
 - `rizhi-settings.json`：保存自定义数据文件路径等设置。
-- `rizhi-settings-location.json`：当你把设置文件改到别的位置时，用来记录新的设置文件地址，保证下次启动仍能找到它。
 
 软件“设置”页会显示这些完整路径。数据文件夹和设置文件都可以改成你指定的位置，方便按月归档、备份或迁移。
-
-设置页主界面只显示数据文件和设置文件。`rizhi-settings-location.json` 是内部定位文件：只有当设置文件被移动到自定义位置时，软件才需要通过它找到新的设置文件地址，因此只在重置确认中列出。
 
 删除功能包括：
 
@@ -37,7 +33,6 @@ C:\Users\用户\AppData\Roaming\RiZhi\memory\rizhi-settings-location.json
 - 数据文件：保存任务安排和每日记录。
 - 设置文件：保存自定义数据文件路径。
 - 内部定位文件：保存自定义设置文件路径。
-- 旧版浏览器存储键：`whbr.tasks`、`whbr.journals`。
 
 打包为 Windows 安装包后，卸载 RiZhi 时会询问是否删除本地记录文件。选择“是”会删除 AppData/Roaming 下的 RiZhi `memory` 文件夹；选择“否”会保留 `memory` 文件夹和其中的文件。
 
@@ -65,19 +60,3 @@ Excel 月计划工作流：
 ```
 
 也支持 `开始时间`、`结束时间` 分列。
-
-## 运行
-
-```powershell
-cd "WHBR PC"
-npm install
-npm start
-```
-
-注意：需要通过 Electron 启动软件，点击 `+` 才能调用系统文件选择器。直接双击打开 `src/index.html` 只能看到静态界面，不能完整访问本地文件系统。
-
-基础检查：
-
-```powershell
-npm run check
-```
