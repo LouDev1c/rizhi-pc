@@ -5,18 +5,36 @@
   "main": "main.js",
   "author": "",
   "license": "UNLICENSED",
+
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LouDev1c/rizhi-pc.git"
+  },
+
   "scripts": {
     "start": "electron .",
     "check": "node --check main.js && node --check preload.js && node --check src/renderer.js && node --check src/parsers/scheduleParser.js && node --check src/parsers/textScheduleParser.js && node --check src/parsers/imageScheduleParser.js && node --check src/parsers/tesseractNodeWorker.js && node --check src/storage/localDataStore.js",
     "pack": "electron-builder --dir",
-    "dist": "electron-builder --win nsis"
+    "dist": "electron-builder --win nsis",
+    "release": "electron-builder --win nsis --publish always"
   },
+
   "build": {
     "appId": "com.rizhi.pc",
     "productName": "日织",
+
     "directories": {
       "output": "dist"
     },
+
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "LouDev1c",
+        "repo": "rizhi-pc"
+      }
+    ],
+
     "files": [
       "main.js",
       "preload.js",
@@ -24,18 +42,21 @@
       "src/**/*",
       "package.json"
     ],
+
     "extraResources": [
       {
         "from": "rizhi.ico",
         "to": "rizhi.ico"
       }
     ],
+
     "asarUnpack": [
       "node_modules/sharp/**/*",
       "node_modules/@img/**/*",
       "node_modules/tesseract.js/**/*",
       "node_modules/tesseract.js-core/**/*"
     ],
+
     "win": {
       "target": [
         {
@@ -47,6 +68,7 @@
       ],
       "icon": "rizhi.ico"
     },
+
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
@@ -55,16 +77,19 @@
       "shortcutName": "日织"
     }
   },
+
   "keywords": [
     "RiZhi",
     "schedule",
     "health",
     "reminder"
   ],
+
   "devDependencies": {
-    "electron": "^32.0.0",
+    "electron": "44.1.1",
     "electron-builder": "^26.15.3"
   },
+
   "dependencies": {
     "@tesseract.js-data/chi_sim": "^1.0.0",
     "@tesseract.js-data/eng": "^1.0.0",
