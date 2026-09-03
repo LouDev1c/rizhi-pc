@@ -5,22 +5,18 @@
   "main": "main.js",
   "author": "",
   "license": "UNLICENSED",
-
   "scripts": {
     "start": "electron .",
     "check": "node --check main.js && node --check preload.js && node --check src/renderer.js && node --check src/parsers/scheduleParser.js && node --check src/parsers/textScheduleParser.js && node --check src/parsers/imageScheduleParser.js && node --check src/parsers/tesseractNodeWorker.js && node --check src/storage/localDataStore.js",
     "pack": "electron-builder --dir",
     "dist": "electron-builder --win nsis"
   },
-
   "build": {
     "appId": "com.rizhi.pc",
     "productName": "日织",
-
     "directories": {
       "output": "dist"
     },
-
     "files": [
       "main.js",
       "preload.js",
@@ -28,21 +24,18 @@
       "src/**/*",
       "package.json"
     ],
-
     "extraResources": [
       {
         "from": "rizhi.ico",
         "to": "rizhi.ico"
       }
     ],
-
     "asarUnpack": [
       "node_modules/sharp/**/*",
       "node_modules/@img/**/*",
       "node_modules/tesseract.js/**/*",
       "node_modules/tesseract.js-core/**/*"
     ],
-
     "win": {
       "target": [
         {
@@ -54,7 +47,6 @@
       ],
       "icon": "rizhi.ico"
     },
-
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
@@ -63,24 +55,22 @@
       "shortcutName": "日织"
     }
   },
-
   "keywords": [
     "RiZhi",
     "schedule",
     "health",
     "reminder"
   ],
-
   "devDependencies": {
     "electron": "^32.0.0",
     "electron-builder": "^26.15.3"
   },
-
   "dependencies": {
     "@tesseract.js-data/chi_sim": "^1.0.0",
     "@tesseract.js-data/eng": "^1.0.0",
+    "electron-updater": "^6.8.9",
     "sharp": "^0.35.4",
     "tesseract.js": "^5.1.1",
-    "xlsx": "^0.18.5"
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   }
 }
