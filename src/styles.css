@@ -71,9 +71,33 @@ button {
 }
 
 .now-task-button span {
-  font-size: 24px;
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  position: relative;
+  color: transparent;
+  font-size: 0;
   font-weight: 800;
   line-height: 1;
+}
+
+.now-task-button span::before,
+.now-task-button span::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 18px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--accent-dark);
+  content: "";
+  transform: translate(-50%, -50%);
+}
+
+.now-task-button span::after {
+  width: 2px;
+  height: 18px;
 }
 
 .brand {

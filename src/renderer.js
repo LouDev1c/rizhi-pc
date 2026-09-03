@@ -1489,7 +1489,7 @@ function buildReminderEvents(task) {
 }
 
 function addRepeatingReminderEvents(events, start, end, focusMinutes, breakMinutes, config) {
-  const focusLengthMinutes = numericSetting(focusMinutes, 45);
+  const focusLengthMinutes = numericSetting(focusMinutes, 50);
   const breakLengthMinutes = numericSetting(breakMinutes, 10);
   let cursor = start;
   let cycle = 0;
@@ -1624,6 +1624,7 @@ function renderSelectedJournal() {
 }
 
 function renderJournalList() {
+  ensureJournalViewDate();
   journalList.innerHTML = '';
 
   if (journals.length === 0) {
@@ -1649,6 +1650,11 @@ function renderJournalList() {
     item.append(title, preview);
     journalList.appendChild(item);
   });
+}
+
+function ensureJournalViewDate() {
+  if (journalViewDate.value) return;
+  journalViewDate.value = latestJournalDate() || formatLocalDate(currentEffectiveNow || new Date());
 }
 
 function openJournalEntry(journal) {
@@ -2003,12 +2009,13 @@ function pageTitleFor(page) {
 
 function defaultProfile() {
   return {
-    focusLength: 45,
+    focusLength: 50,
     breakReminder: true,
-    classDuration: 45,
+    classDuration: 50,
     classBreakLength: 10,
-    workFocusLength: 45,
-    workBreakLength: 10
+    workFocusLength: 50,
+    workBreakLength: 10,
+    defaultsVersion: '0.1.2'
   };
 }
 
@@ -2029,20 +2036,20 @@ function normalizedProfile() {
 function loadProfileToForm() {
   const data = normalizedProfile();
   breakReminder.checked = Boolean(data.breakReminder);
-  classDuration.value = String(data.classDuration || 45);
+  classDuration.value = String(data.classDuration || 50);
   classBreakLength.value = String(data.classBreakLength || 10);
-  workFocusLength.value = String(data.workFocusLength || data.focusLength || 45);
+  workFocusLength.value = String(data.workFocusLength || data.focusLength || 50);
   workBreakLength.value = String(data.workBreakLength || 10);
 }
 
 async function saveProfileFromForm() {
   profile = {
     ...normalizedProfile(),
-    focusLength: numericSetting(workFocusLength.value, 45),
+    focusLength: numericSetting(workFocusLength.value, 50),
     breakReminder: breakReminder.checked,
-    classDuration: numericSetting(classDuration.value, 45),
+    classDuration: numericSetting(classDuration.value, 50),
     classBreakLength: numericSetting(classBreakLength.value, 10),
-    workFocusLength: numericSetting(workFocusLength.value, 45),
+    workFocusLength: numericSetting(workFocusLength.value, 50),
     workBreakLength: numericSetting(workBreakLength.value, 10)
   };
   await saveState();
@@ -2068,13 +2075,47 @@ async function initializeAppData() {
       ...(result.data.profile || {})
     };
     storagePaths = result.paths || storagePaths;
+    const migratedProfile = migrateProfileDefaults(profile);
+    profile = migratedProfile.profile;
+    journalViewDate.value = latestJournalDate() || journalDate.value || formatLocalDate(new Date());
     loadProfileToForm();
     await migrateLegacyLocalStorageIfNeeded();
+    if (migratedProfile.changed) await saveState();
     updateStoragePathView();
     renderAll();
   } catch (error) {
     setStatus(`加载数据失败：${error.message}`, '');
   }
+}
+
+function migrateProfileDefaults(profileData) {
+  const migrated = { ...profileData };
+  let changed = false;
+  if (migrated.defaultsVersion !== '0.1.2') {
+    if (Number(migrated.classDuration) === 45) {
+      migrated.classDuration = 50;
+      changed = true;
+    }
+    if (Number(migrated.workFocusLength) === 45) {
+      migrated.workFocusLength = 50;
+      changed = true;
+    }
+    if (Number(migrated.focusLength) === 45) {
+      migrated.focusLength = 50;
+      changed = true;
+    }
+    migrated.defaultsVersion = '0.1.2';
+    changed = true;
+  }
+  return { profile: migrated, changed };
+}
+
+function latestJournalDate() {
+  return journals
+    .map((journal) => journalSortEnd(journal))
+    .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date) && date !== '0000-00-00')
+    .sort()
+    .at(-1) || '';
 }
 
 async function migrateLegacyLocalStorageIfNeeded() {

@@ -1,10 +1,10 @@
 {
   "name": "rizhi",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "日织 - 工作、学习与生活平衡管理桌面客户端",
   "main": "main.js",
   "author": "",
-  "license": "UNLICENSED",
+  "license": "MIT",
 
   "repository": {
     "type": "git",
