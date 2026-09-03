@@ -4,11 +4,12 @@ const { pathToFileURL } = require('url');
 const fsSync = require('fs');
 const fs = require('fs/promises');
 const { parseScheduleFile } = require('./src/parsers/scheduleParser');
-const { parseScheduleImage } = require('./src/parsers/imageScheduleParser');
 const { getStoragePaths, loadData, resetData, saveData, setDataPath, setSettingsPath } = require('./src/storage/localDataStore');
 const { autoUpdater } = require('electron-updater');
 
-const allowedExtensions = new Set(['.png', '.jpg', '.jpeg', '.csv', '.tsv', '.xlsx', '.xls']);
+const scheduleFileExtensions = ['xlsx', 'xls', 'csv', 'tsv'];
+const dailyFileExtensions = ['xlsx', 'xls', 'csv', 'tsv', 'pdf'];
+const allowedExtensions = new Set(dailyFileExtensions.map((extension) => `.${extension}`));
 const appIconPath = resolveAppIconPath();
 let mainWindow = null;
 let reminderWindow = null;
@@ -18,6 +19,7 @@ let isReminderShowing = false;
 let tray = null;
 let isQuitting = false;
 let isClosePromptShowing = false;
+let isUpdatePromptShowing = false;
 
 if (process.platform === 'win32') {
   app.setAppUserModelId('com.rizhi.pc');
@@ -78,14 +80,35 @@ function setupAutoUpdater() {
     return;
   }
 
-  autoUpdater.autoDownload = true;
+  autoUpdater.autoDownload = false;
 
   autoUpdater.on('checking-for-update', () => {
     console.log('RiZhi: checking for updates...');
   });
 
-  autoUpdater.on('update-available', (info) => {
-    console.log(`RiZhi: update available: ${info.version}`);
+  autoUpdater.on('update-available', async (info) => {
+    const versionLabel = formatVersionLabel(info.version);
+    console.log(`RiZhi: update available: ${versionLabel}`);
+
+    if (isUpdatePromptShowing) return;
+    isUpdatePromptShowing = true;
+
+    const result = await dialog.showMessageBox(mainWindow || undefined, {
+      type: 'question',
+      title: '日织更新',
+      message: `有新版本${versionLabel}，是否更新？`,
+      detail: '选择“是”后将从 GitHub Release 下载并安装新版本。选择“否”会继续使用当前版本，且不会处理你的本地记录文件。',
+      buttons: ['是', '否'],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true
+    });
+
+    isUpdatePromptShowing = false;
+
+    if (result.response === 0) {
+      autoUpdater.downloadUpdate();
+    }
   });
 
   autoUpdater.on('update-not-available', () => {
@@ -99,19 +122,20 @@ function setupAutoUpdater() {
   });
 
   autoUpdater.on('update-downloaded', async (info) => {
-    const result = await dialog.showMessageBox({
+    const versionLabel = formatVersionLabel(info.version);
+    await dialog.showMessageBox(mainWindow || undefined, {
       type: 'info',
       title: '日织更新',
-      message: `新版本 ${info.version} 已下载完成`,
-      detail: '是否立即重启日织并完成更新？',
-      buttons: ['立即更新', '稍后'],
+      message: `新版本 ${versionLabel} 已下载完成`,
+      detail: '日织将重启并完成更新。',
+      buttons: ['立即更新'],
       defaultId: 0,
-      cancelId: 1
+      cancelId: 0,
+      noLink: true
     });
 
-    if (result.response === 0) {
-      autoUpdater.quitAndInstall();
-    }
+    isQuitting = true;
+    autoUpdater.quitAndInstall(false, true);
   });
 
   autoUpdater.on('error', (error) => {
@@ -119,6 +143,11 @@ function setupAutoUpdater() {
   });
 
   autoUpdater.checkForUpdates();
+}
+
+function formatVersionLabel(version) {
+  const text = String(version || '').trim();
+  return text.startsWith('v') ? text : `v${text}`;
 }
 
 app.whenReady().then(() => {
@@ -350,18 +379,14 @@ ipcMain.handle('app:getVersion', () => {
 
 ipcMain.handle('file:selectAndParse', async (_event, options = {}) => {
   const isScheduleImport = options && options.kind === 'schedule';
+  const extensions = isScheduleImport ? scheduleFileExtensions : dailyFileExtensions;
   const result = await dialog.showOpenDialog({
-    title: isScheduleImport ? '选择课表表格文件' : '选择每日安排图片或表格文件',
+    title: isScheduleImport ? '选择课表文件' : '选择每日安排表格文件',
     properties: ['openFile'],
-    filters: isScheduleImport
-      ? [
-          { name: '课表表格', extensions: ['csv', 'tsv', 'xlsx', 'xls'] }
-        ]
-      : [
-          { name: '每日安排图片或表格', extensions: ['png', 'jpg', 'jpeg', 'csv', 'tsv', 'xlsx', 'xls'] },
-          { name: '图片', extensions: ['png', 'jpg', 'jpeg'] },
-          { name: '表格', extensions: ['csv', 'tsv', 'xlsx', 'xls'] }
-        ]
+    filters: [
+      { name: isScheduleImport ? '课表文件' : '每日安排表格文件', extensions },
+      { name: '表格文件', extensions }
+    ]
   });
 
   if (result.canceled || result.filePaths.length === 0) {
@@ -445,7 +470,7 @@ async function parseSelectedFile(filePath) {
   if (!allowedExtensions.has(ext)) {
     return {
       canceled: false,
-      error: '暂不支持该文件类型',
+      error: '暂不支持该文件类型，请选择 xlsx、xls、csv、tsv 或 pdf 表格文件。',
       filePath,
       tasks: []
     };
@@ -459,15 +484,6 @@ async function parseSelectedFile(filePath) {
     fileSize: stat.size,
     importedAt: new Date().toISOString()
   };
-
-  if (['.png', '.jpg', '.jpeg'].includes(ext)) {
-    const visionResult = await parseScheduleImage(filePath);
-    return {
-      ...basePayload,
-      sourceType: 'image',
-      ...visionResult
-    };
-  }
 
   const parseResult = await parseScheduleFile(filePath);
   return {

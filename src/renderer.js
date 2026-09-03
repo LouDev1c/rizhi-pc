@@ -130,7 +130,7 @@ const tutorialSteps = [
     page: 'tasks',
     targetSelector: '#importMoreButton',
     title: '批量创建任务',
-    text: '点击这个按钮，可手动填写或上传文件生成课表，也可以批量创建每日任务安排。'
+    text: '点击这个按钮，可手动填写或上传表格文件生成课表，也可以批量创建每日任务安排。'
   },
   {
     page: 'records',
@@ -427,7 +427,9 @@ function currentPageKey() {
 }
 
 async function importScheduleFile(kind = 'daily') {
-  setStatus('请选择要导入的图片或表格文件……', '');
+  setStatus(kind === 'schedule'
+    ? '请选择要导入的课表文件，仅支持 xlsx、xls、csv 或 tsv。'
+    : '请选择要导入的每日安排表格文件，仅支持 xlsx、xls、csv、tsv 或 pdf。', '');
   closeImportChoiceModal();
 
   try {
@@ -437,7 +439,7 @@ async function importScheduleFile(kind = 'daily') {
       return;
     }
 
-    const result = await parseSelectedImportFile(selectedFile);
+    const result = await parseSelectedImportFile(selectedFile, kind);
 
     if (result.message) {
       setStatus(result.message, result.status === 'ok' ? 'hidden' : '');
@@ -484,26 +486,39 @@ async function importDroppedFile(file) {
   }
 }
 
-async function parseSelectedImportFile(file) {
+async function parseSelectedImportFile(file, kind = 'daily') {
   const fileName = file.fileName || file.filePath.split(/[\\/]/).pop();
   const ext = fileName.split('.').pop().toLowerCase();
-  const isImage = ['png', 'jpg', 'jpeg'].includes(ext);
   const isExcel = ['xlsx', 'xls'].includes(ext);
+  const isPdf = ext === 'pdf';
+  const isScheduleUnsupported = kind === 'schedule' && !['xlsx', 'xls', 'csv', 'tsv'].includes(ext);
+
+  if (isScheduleUnsupported) {
+    return {
+      canceled: false,
+      error: '课表入口目前只支持 xlsx、xls、csv 或 tsv 文件。PDF 课表暂不在 v0.1.2 支持范围内。',
+      filePath: file.filePath,
+      fileName,
+      tasks: []
+    };
+  }
 
   setStatus(`已选择 ${fileName}，正在读取文件……`, '');
   await waitForPaint();
 
-  setStatus(isImage
-    ? '正在转化中……正在增强图片并准备 OCR 识别。'
-    : isExcel
+  setStatus(kind === 'schedule'
+    ? '正在转化中……正在读取课表文件。'
+    : isPdf
+      ? '正在转化中……正在读取 PDF 表格。'
+      : isExcel
       ? '正在转化中……正在读取 Excel 工作表。'
       : '正在转化中……正在读取表格内容。', '');
   await waitForPaint();
 
   const result = await window.whbr.parseFilePath(file.filePath);
 
-  setStatus(isImage
-    ? '正在整理图片识别结果，准备填入课表。'
+  setStatus(kind === 'schedule'
+    ? '正在整理课表文件解析结果，准备预填课表。'
     : '正在整理表格解析结果，准备写入任务。', '');
   await waitForPaint();
 
@@ -517,14 +532,14 @@ function validateImportKind(result, kind = 'daily') {
 
   if (kind === 'schedule') {
     if (!isTable) {
-      setStatus('课表入口目前只支持表格文件，请选择 xlsx、xls、csv 或 tsv 文件。', '');
+      setStatus('课表入口目前只支持 xlsx、xls、csv 或 tsv 文件。', '');
       return false;
     }
 
     if (!hasTimetable) {
       setStatus(importedTasks.length > 0
         ? '这个文件看起来是每日安排，不是学期课表。请从“每日安排”的导入安排文件入口上传。'
-        : '没有识别到课表网格。请上传包含周一至周日列的课表表格文件。', '');
+        : '没有识别到课表网格。请上传包含周一至周日列的课表文件。', '');
       return false;
     }
 
@@ -532,7 +547,7 @@ function validateImportKind(result, kind = 'daily') {
   }
 
   if (hasTimetable) {
-    setStatus('这个文件看起来是学期课表，不是每日安排。请从“课表”的导入课表表格入口上传。', '');
+    setStatus('这个文件看起来是学期课表，不是每日安排。请从“课表”的导入课表文件入口上传。', '');
     return false;
   }
 
@@ -579,7 +594,6 @@ async function handleParsedImport(result, kind = 'daily') {
 }
 
 function shouldAskImportDateRange(result, importedTasks) {
-  if (result.sourceType === 'image') return true;
   const datedSheetCount = Number(result.datedSheetCount || 0);
   const distinctDates = new Set(importedTasks.map((task) => normalizeDate(task.date)).filter(Boolean));
   if (result.sourceType === 'table' && datedSheetCount > 1 && distinctDates.size > 1) return false;
@@ -631,7 +645,7 @@ async function confirmImportWithDateRange() {
 function openImportChoiceModal() {
   const hasSchedule = hasScheduleTemplate();
   manualScheduleButton.textContent = hasSchedule ? '查看/修改课表' : '手动添加课表';
-  fileScheduleButton.textContent = hasSchedule ? '更新课表表格' : '导入课表表格';
+  fileScheduleButton.textContent = hasSchedule ? '更新课表文件' : '导入课表文件';
   importChoiceModal.classList.remove('hidden');
 }
 
@@ -689,6 +703,7 @@ function addScheduleTableRow(timeRange = '', courses = [], sectionLabel = '') {
   timeInput.inputMode = 'numeric';
   timeInput.maxLength = 11;
   timeInput.dataset.role = 'schedule-time';
+  timeInput.dataset.sectionLabel = sectionLabel || '';
   timeInput.title = sectionLabel ? `${sectionLabel}，请填写具体时间，如 08:00-09:40` : '请填写具体时间，如 08:00-09:40';
   timeInput.value = formatTimeRangeInput(timeRange);
   timeInput.addEventListener('input', () => {
@@ -735,7 +750,9 @@ function refreshScheduleTableGuidance() {
     const timeInput = row.querySelector('input[data-role="schedule-time"]');
     const courseInputs = Array.from(row.querySelectorAll('input[data-role="schedule-course"]'));
     if (timeInput) {
-      timeInput.placeholder = rowIndex === 0 ? '08:00-09:40' : '';
+      timeInput.placeholder = timeInput.dataset.sectionLabel
+        ? `${timeInput.dataset.sectionLabel}时间`
+        : rowIndex === 0 ? '08:00-09:40' : '';
     }
     courseInputs.forEach((input) => {
       input.placeholder = rowIndex === 0 ? '课程名称' : '';
@@ -1995,7 +2012,6 @@ function statusClass(status) {
 }
 
 function sourceLabel(sourceType) {
-  if (sourceType === 'image') return '图片识别';
   if (sourceType === 'table') return '表格解析';
   return '文件导入';
 }
