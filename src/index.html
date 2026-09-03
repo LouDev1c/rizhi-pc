@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>RiZhi</title>
+    <title>日织</title>
     <link rel="icon" href="../rizhi.ico" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
@@ -11,9 +11,9 @@
     <div class="shell">
       <aside class="sidebar">
         <div class="brand">
-          <img class="brand-mark" src="../rizhi.ico" alt="RiZhi" />
+          <img class="brand-mark" src="../rizhi.ico" alt="日织" />
           <div>
-            <strong>RiZhi</strong>
+            <strong>日织</strong>
             <span>日程与记录</span>
           </div>
         </div>
@@ -45,12 +45,15 @@
       <main class="main">
         <header class="topbar">
           <div>
-            <p class="eyebrow">RiZhi</p>
+            <p class="eyebrow">日织</p>
             <h1 id="pageTitle">任务</h1>
           </div>
-          <div class="clock">
-            <span>系统时间</span>
-            <strong id="systemTime">--</strong>
+          <div class="topbar-actions">
+            <div class="clock">
+              <span>系统时间</span>
+              <strong id="systemTime">--</strong>
+            </div>
+            <button id="tutorialButton" class="secondary-button tutorial-button" type="button">使用教程</button>
           </div>
         </header>
 
@@ -140,7 +143,7 @@
               </div>
             </section>
 
-            <section class="panel">
+            <section class="panel records-list-panel">
               <div class="section-head">
                 <div>
                   <h2>记录列表</h2>
@@ -160,7 +163,7 @@
 
         <section id="settingsPage" class="page">
           <div class="settings-layout">
-            <section class="panel">
+            <section class="panel settings-data-panel">
               <h2>数据文件</h2>
               <p class="muted">任务安排和每日记录会按月写入本地 JSON 文件，命名为 rizhi-data-YYYY-MM.json。你可以自己选择保存文件夹，方便归档、备份或迁移。</p>
 
@@ -179,34 +182,6 @@
                     <button id="chooseSettingsPathButton" class="folder-button" type="button" aria-label="选择设置文件位置">📁</button>
                   </div>
                 </div>
-              </div>
-            </section>
-
-            <section class="panel">
-              <h2>时间</h2>
-              <p class="muted">调试时可以临时设定软件时间。选择自定义时间后，会从确认的时间点开始按正常速度流逝。</p>
-              <div class="time-mode-group">
-                <label class="toggle-row">
-                  <input id="timeModeSystem" name="timeMode" type="radio" value="system" checked />
-                  <span>与系统时间保持一致</span>
-                </label>
-                <label class="toggle-row">
-                  <input id="timeModeCustom" name="timeMode" type="radio" value="custom" />
-                  <span>自己设定时间</span>
-                </label>
-              </div>
-              <div id="customTimeFields" class="custom-time-fields hidden">
-                <div class="form-row">
-                  <label class="field">
-                    <span>日期</span>
-                    <input id="customTimeDate" type="date" />
-                  </label>
-                  <label class="field">
-                    <span>时间</span>
-                    <input id="customTimeValue" type="time" step="1" />
-                  </label>
-                </div>
-                <button id="applyCustomTimeButton" class="primary-button" type="button">确认时间</button>
               </div>
             </section>
 
@@ -242,7 +217,7 @@
 
         <label class="confirm-row">
           <input id="resetConfirmCheck" type="checkbox" />
-          <span id="resetConfirmText">我确认删除这些 RiZhi 数据</span>
+          <span id="resetConfirmText">我确认删除这些日织数据</span>
         </label>
 
         <div class="modal-actions">
@@ -450,6 +425,48 @@
           <button id="closeJournalViewButton" class="primary-button" type="button">关闭</button>
         </div>
       </div>
+    </div>
+
+    <div id="tutorialConfirmModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="tutorialConfirmTitle">
+      <div class="modal-card small-modal">
+        <div class="modal-header">
+          <div>
+            <p class="eyebrow">使用教程</p>
+            <h2 id="tutorialConfirmTitle">是否查看使用教程？</h2>
+          </div>
+          <button id="tutorialConfirmNoButton" class="icon-button" aria-label="关闭">×</button>
+        </div>
+
+        <p class="muted">教程会依次介绍批量创建任务、记录、个人设置、数据文件和定位按钮。</p>
+
+        <div class="modal-actions">
+          <button id="tutorialNoButton" class="secondary-button" type="button">否</button>
+          <button id="tutorialYesButton" class="primary-button" type="button">是</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="tutorialOverlay" class="tutorial-overlay hidden" aria-live="polite">
+      <div id="tutorialHighlight" class="tutorial-highlight"></div>
+      <svg id="tutorialArrow" class="tutorial-arrow" aria-hidden="true">
+        <defs>
+          <marker id="tutorialArrowHead" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+            <path d="M 0 0 L 10 5 L 0 10 z"></path>
+          </marker>
+        </defs>
+        <line id="tutorialArrowLine" x1="0" y1="0" x2="0" y2="0"></line>
+      </svg>
+
+      <section id="tutorialCard" class="tutorial-card" role="dialog" aria-modal="true" aria-labelledby="tutorialTitle">
+        <span id="tutorialCounter" class="tutorial-counter"></span>
+        <h2 id="tutorialTitle"></h2>
+        <p id="tutorialText"></p>
+        <div class="tutorial-actions">
+          <button id="tutorialPrevButton" class="secondary-button" type="button">上一步</button>
+          <button id="tutorialNextButton" class="primary-button" type="button">下一步</button>
+          <button id="tutorialCloseButton" class="primary-button hidden" type="button">关闭</button>
+        </div>
+      </section>
     </div>
 
     <script src="./renderer.js"></script>

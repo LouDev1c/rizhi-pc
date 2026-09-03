@@ -16,6 +16,7 @@ let reminderQueue = [];
 let isReminderShowing = false;
 let tray = null;
 let isQuitting = false;
+let isClosePromptShowing = false;
 
 if (process.platform === 'win32') {
   app.setAppUserModelId('com.rizhi.pc');
@@ -28,7 +29,7 @@ function createWindow() {
     minWidth: 920,
     minHeight: 620,
     backgroundColor: '#f4f5f7',
-    title: 'RiZhi',
+    title: '日织',
     icon: appIconPath,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -40,15 +41,34 @@ function createWindow() {
 
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
 
-  mainWindow.on('minimize', (event) => {
-    event.preventDefault();
-    hideMainWindow();
-  });
-
-  mainWindow.on('close', (event) => {
+  mainWindow.on('close', async (event) => {
     if (isQuitting) return;
     event.preventDefault();
-    hideMainWindow();
+
+    if (isClosePromptShowing) return;
+    isClosePromptShowing = true;
+
+    const choice = await dialog.showMessageBox(mainWindow, {
+      type: 'question',
+      title: '关闭日织',
+      message: '要退出软件，还是最小化到托盘继续运行？',
+      buttons: ['最小化到托盘', '退出软件', '取消'],
+      defaultId: 0,
+      cancelId: 2,
+      noLink: true
+    });
+
+    isClosePromptShowing = false;
+
+    if (choice.response === 1) {
+      isQuitting = true;
+      app.quit();
+      return;
+    }
+
+    if (choice.response === 0) {
+      hideMainWindow();
+    }
   });
 }
 
@@ -74,10 +94,10 @@ function createTray() {
   if (tray) return;
 
   tray = new Tray(createTrayIcon());
-  tray.setToolTip('RiZhi');
+  tray.setToolTip('日织');
   tray.setContextMenu(Menu.buildFromTemplate([
     {
-      label: '打开 RiZhi',
+      label: '打开日织',
       click: showMainWindow
     },
     {
@@ -141,7 +161,7 @@ function showNextDesktopReminder() {
 }
 
 function displayDesktopReminder(payload = {}) {
-  const title = escapeHtml(payload.title || 'RiZhi 提醒');
+  const title = escapeHtml(payload.title || '日织提醒');
   const body = escapeHtml(payload.body || '');
   const display = screen.getPrimaryDisplay();
   const { width, height } = display.workAreaSize;
@@ -322,7 +342,7 @@ ipcMain.handle('data:getPaths', async () => {
 
 ipcMain.handle('data:choosePath', async (_event, data) => {
   const result = await dialog.showOpenDialog({
-    title: '选择 RiZhi 月度数据文件夹',
+    title: '选择日织月度数据文件夹',
     properties: ['openDirectory', 'createDirectory']
   });
 
@@ -338,10 +358,10 @@ ipcMain.handle('data:choosePath', async (_event, data) => {
 
 ipcMain.handle('data:chooseSettingsPath', async (_event, data) => {
   const result = await dialog.showSaveDialog({
-    title: '选择 RiZhi 设置文件保存位置',
+    title: '选择日织设置文件保存位置',
     defaultPath: 'rizhi-settings.json',
     filters: [
-      { name: 'RiZhi 设置文件', extensions: ['json'] },
+      { name: '日织设置文件', extensions: ['json'] },
       { name: 'JSON', extensions: ['json'] }
     ]
   });

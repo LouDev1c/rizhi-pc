@@ -1,7 +1,6 @@
 const pageTitle = document.querySelector('#pageTitle');
 const appIconLink = document.querySelector('link[rel="icon"]');
 const brandMark = document.querySelector('.brand-mark');
-const systemTimeLabel = document.querySelector('.clock span');
 const systemTime = document.querySelector('#systemTime');
 const navItems = document.querySelectorAll('.nav-item');
 const pages = {
@@ -88,12 +87,22 @@ const classBreakLength = document.querySelector('#classBreakLength');
 const workFocusLength = document.querySelector('#workFocusLength');
 const workBreakLength = document.querySelector('#workBreakLength');
 const breakReminder = document.querySelector('#breakReminder');
-const timeModeSystem = document.querySelector('#timeModeSystem');
-const timeModeCustom = document.querySelector('#timeModeCustom');
-const customTimeFields = document.querySelector('#customTimeFields');
-const customTimeDate = document.querySelector('#customTimeDate');
-const customTimeValue = document.querySelector('#customTimeValue');
-const applyCustomTimeButton = document.querySelector('#applyCustomTimeButton');
+const tutorialButton = document.querySelector('#tutorialButton');
+const tutorialConfirmModal = document.querySelector('#tutorialConfirmModal');
+const tutorialConfirmNoButton = document.querySelector('#tutorialConfirmNoButton');
+const tutorialNoButton = document.querySelector('#tutorialNoButton');
+const tutorialYesButton = document.querySelector('#tutorialYesButton');
+const tutorialOverlay = document.querySelector('#tutorialOverlay');
+const tutorialHighlight = document.querySelector('#tutorialHighlight');
+const tutorialArrow = document.querySelector('#tutorialArrow');
+const tutorialArrowLine = document.querySelector('#tutorialArrowLine');
+const tutorialCard = document.querySelector('#tutorialCard');
+const tutorialCounter = document.querySelector('#tutorialCounter');
+const tutorialTitle = document.querySelector('#tutorialTitle');
+const tutorialText = document.querySelector('#tutorialText');
+const tutorialPrevButton = document.querySelector('#tutorialPrevButton');
+const tutorialNextButton = document.querySelector('#tutorialNextButton');
+const tutorialCloseButton = document.querySelector('#tutorialCloseButton');
 
 let tasks = [];
 let journals = [];
@@ -111,13 +120,72 @@ let highlightedTaskId = '';
 let currentEffectiveNow = new Date();
 let lastReminderCheckValue = null;
 let statusTimer = null;
+let tutorialStepIndex = 0;
+let previousTutorialPage = 'tasks';
 const firedReminderKeys = new Set();
 const activePlanningDates = new Set();
+const tutorialSteps = [
+  {
+    page: 'tasks',
+    targetSelector: '#importMoreButton',
+    title: '批量创建任务',
+    text: '点击这个按钮，可手动填写或上传文件生成课表，也可以批量创建每日任务安排。'
+  },
+  {
+    page: 'records',
+    targetSelector: '.journal-editor .section-head',
+    title: '每日生活记录',
+    text: '每日记录用于写下当天的活动、状态和复盘内容，帮助你保留每天的生活脉络。'
+  },
+  {
+    page: 'records',
+    targetSelector: '.records-list-panel .section-head',
+    title: '记录列表',
+    text: '记录列表可以按日期查看历史记录，像翻看日记一样回顾之前写下的内容。'
+  },
+  {
+    page: 'profile',
+    targetSelector: '.profile-grid .panel',
+    title: '个人设置',
+    text: '这里可以设置课程、工作和学习的时间周期，日织会按这些信息提醒你专注或休息。'
+  },
+  {
+    page: 'settings',
+    targetSelector: '.settings-data-panel .path-list',
+    title: '数据文件',
+    text: '个人记录与软件设置会存放在这里显示的位置，也可以按你的习惯自定义保存地址。'
+  },
+  {
+    page: 'settings',
+    targetSelector: '#backToCurrentTaskButton',
+    title: '定位按钮',
+    text: '点击这个按钮可以回到当前任务，并快速定位到此刻正在进行的安排。'
+  },
+  {
+    page: 'tasks',
+    title: '教程已结束',
+    text: '教程已结束，祝使用愉快。'
+  }
+];
 
 navItems.forEach((item) => {
   item.addEventListener('click', () => {
     showPage(item.dataset.page);
   });
+});
+
+if (tutorialButton) tutorialButton.addEventListener('click', openTutorialConfirmModal);
+if (tutorialConfirmNoButton) tutorialConfirmNoButton.addEventListener('click', closeTutorialConfirmModal);
+if (tutorialNoButton) tutorialNoButton.addEventListener('click', closeTutorialConfirmModal);
+if (tutorialYesButton) tutorialYesButton.addEventListener('click', startTutorial);
+if (tutorialPrevButton) tutorialPrevButton.addEventListener('click', showPreviousTutorialStep);
+if (tutorialNextButton) tutorialNextButton.addEventListener('click', showNextTutorialStep);
+if (tutorialCloseButton) tutorialCloseButton.addEventListener('click', finishTutorial);
+tutorialConfirmModal.addEventListener('click', (event) => {
+  if (event.target === tutorialConfirmModal) closeTutorialConfirmModal();
+});
+window.addEventListener('resize', () => {
+  if (!tutorialOverlay.classList.contains('hidden')) positionTutorialOverlay();
 });
 
 backToCurrentTaskButton.addEventListener('click', goToCurrentTask);
@@ -146,6 +214,9 @@ window.addEventListener('keydown', (event) => {
   }
   if (event.key === 'Escape' && !journalViewModal.classList.contains('hidden')) {
     closeJournalViewModal();
+  }
+  if (event.key === 'Escape' && !tutorialConfirmModal.classList.contains('hidden')) {
+    closeTutorialConfirmModal();
   }
 });
 if (importFileButton) {
@@ -220,18 +291,138 @@ journalViewModal.addEventListener('click', (event) => {
 [classDuration, classBreakLength, workFocusLength, workBreakLength, breakReminder].forEach((input) => {
   input.addEventListener('change', saveProfileFromForm);
 });
-timeModeSystem.addEventListener('change', handleTimeModeChange);
-timeModeCustom.addEventListener('change', handleTimeModeChange);
-applyCustomTimeButton.addEventListener('click', applyCustomTime);
 
 async function refreshSystemTime() {
   const now = await getEffectiveNow();
   currentEffectiveNow = now;
   const weekday = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][now.getDay()];
-  systemTimeLabel.textContent = normalizedProfile().timeMode === 'custom' ? '软件时间' : '系统时间';
   systemTime.textContent = `${formatClockDate(now)} ${weekday} ${formatClockTime(now)}`;
   updateTaskTemporalView({ scrollToCurrent: true });
   checkDueReminders(now);
+}
+
+function openTutorialConfirmModal() {
+  previousTutorialPage = currentPageKey();
+  tutorialConfirmModal.classList.remove('hidden');
+  tutorialYesButton.focus();
+}
+
+function closeTutorialConfirmModal() {
+  tutorialConfirmModal.classList.add('hidden');
+}
+
+async function startTutorial() {
+  closeTutorialConfirmModal();
+  tutorialStepIndex = 0;
+  tutorialOverlay.classList.remove('hidden');
+  await showTutorialStep();
+}
+
+async function showTutorialStep() {
+  const step = tutorialSteps[tutorialStepIndex];
+  if (!step) return;
+
+  showPage(step.page);
+  if (step.page === 'tasks') renderTasks();
+  if (step.page === 'records') {
+    renderJournalList();
+    renderSelectedJournal();
+  }
+
+  await waitForPaint();
+  scrollTutorialTargetIntoView(step);
+  await waitForPaint();
+
+  tutorialCounter.textContent = tutorialStepIndex < tutorialSteps.length - 1
+    ? `第 ${tutorialStepIndex + 1} / ${tutorialSteps.length - 1} 步`
+    : '';
+  tutorialTitle.textContent = step.title;
+  tutorialText.textContent = step.text;
+  tutorialPrevButton.disabled = tutorialStepIndex === 0;
+  tutorialPrevButton.classList.toggle('hidden', tutorialStepIndex === tutorialSteps.length - 1);
+  tutorialNextButton.classList.toggle('hidden', tutorialStepIndex === tutorialSteps.length - 1);
+  tutorialCloseButton.classList.toggle('hidden', tutorialStepIndex !== tutorialSteps.length - 1);
+
+  positionTutorialOverlay();
+}
+
+async function showPreviousTutorialStep() {
+  if (tutorialStepIndex <= 0) return;
+  tutorialStepIndex -= 1;
+  await showTutorialStep();
+}
+
+async function showNextTutorialStep() {
+  if (tutorialStepIndex >= tutorialSteps.length - 1) return;
+  tutorialStepIndex += 1;
+  await showTutorialStep();
+}
+
+function finishTutorial() {
+  tutorialOverlay.classList.add('hidden');
+  showPage('tasks');
+  renderTasks();
+}
+
+function scrollTutorialTargetIntoView(step) {
+  const target = getTutorialTarget(step);
+  if (!target) return;
+  target.scrollIntoView({ block: 'center', inline: 'center' });
+}
+
+function positionTutorialOverlay() {
+  const step = tutorialSteps[tutorialStepIndex];
+  const target = getTutorialTarget(step);
+
+  if (!step || !target) {
+    tutorialHighlight.classList.add('hidden');
+    tutorialArrow.classList.add('hidden');
+    return;
+  }
+
+  const rect = target.getBoundingClientRect();
+  const padding = 8;
+  tutorialHighlight.classList.remove('hidden');
+  tutorialArrow.classList.remove('hidden');
+  tutorialHighlight.style.left = `${Math.max(0, rect.left - padding)}px`;
+  tutorialHighlight.style.top = `${Math.max(0, rect.top - padding)}px`;
+  tutorialHighlight.style.width = `${Math.min(window.innerWidth, rect.width + padding * 2)}px`;
+  tutorialHighlight.style.height = `${Math.min(window.innerHeight, rect.height + padding * 2)}px`;
+
+  const cardRect = tutorialCard.getBoundingClientRect();
+  const cardCenter = {
+    x: cardRect.left + cardRect.width / 2,
+    y: cardRect.top + cardRect.height / 2
+  };
+  const targetPoint = closestPointOnRect(rect, cardCenter);
+  const startPoint = closestPointOnRect(cardRect, targetPoint);
+
+  tutorialArrow.setAttribute('viewBox', `0 0 ${window.innerWidth} ${window.innerHeight}`);
+  tutorialArrowLine.setAttribute('x1', String(startPoint.x));
+  tutorialArrowLine.setAttribute('y1', String(startPoint.y));
+  tutorialArrowLine.setAttribute('x2', String(targetPoint.x));
+  tutorialArrowLine.setAttribute('y2', String(targetPoint.y));
+}
+
+function closestPointOnRect(rect, point) {
+  const clampedX = Math.max(rect.left, Math.min(point.x, rect.right));
+  const clampedY = Math.max(rect.top, Math.min(point.y, rect.bottom));
+  const distances = [
+    { x: clampedX, y: rect.top, value: Math.abs(point.y - rect.top) },
+    { x: clampedX, y: rect.bottom, value: Math.abs(point.y - rect.bottom) },
+    { x: rect.left, y: clampedY, value: Math.abs(point.x - rect.left) },
+    { x: rect.right, y: clampedY, value: Math.abs(point.x - rect.right) }
+  ];
+  return distances.sort((a, b) => a.value - b.value)[0];
+}
+
+function getTutorialTarget(step) {
+  if (!step || !step.targetSelector) return null;
+  return document.querySelector(step.targetSelector);
+}
+
+function currentPageKey() {
+  return Object.entries(pages).find(([, page]) => page.classList.contains('active'))?.[0] || 'tasks';
 }
 
 async function importScheduleFile(kind = 'daily') {
@@ -1208,7 +1399,7 @@ function checkDueReminders(now) {
         priority: reminderEventPriority(event.kind),
         order: Number.isFinite(task.order) ? task.order : taskIndex,
         payload: {
-          title: 'RiZhi 提醒',
+          title: '日织提醒',
           body: event.message
         }
       });
@@ -1816,17 +2007,21 @@ function defaultProfile() {
     classDuration: 45,
     classBreakLength: 10,
     workFocusLength: 45,
-    workBreakLength: 10,
-    timeMode: 'system',
-    customClockBaseTimestamp: 0,
-    customClockStartedAt: 0
+    workBreakLength: 10
   };
 }
 
 function normalizedProfile() {
+  const {
+    timeMode,
+    customClockBaseTimestamp,
+    customClockStartedAt,
+    ...systemTimeProfile
+  } = profile || {};
+
   return {
     ...defaultProfile(),
-    ...profile
+    ...systemTimeProfile
   };
 }
 
@@ -1837,15 +2032,6 @@ function loadProfileToForm() {
   classBreakLength.value = String(data.classBreakLength || 10);
   workFocusLength.value = String(data.workFocusLength || data.focusLength || 45);
   workBreakLength.value = String(data.workBreakLength || 10);
-  timeModeSystem.checked = data.timeMode !== 'custom';
-  timeModeCustom.checked = data.timeMode === 'custom';
-  customTimeFields.classList.toggle('hidden', data.timeMode !== 'custom');
-
-  const now = data.timeMode === 'custom' && data.customClockBaseTimestamp
-    ? new Date(data.customClockBaseTimestamp)
-    : currentEffectiveNow;
-  customTimeDate.value = formatLocalDate(now);
-  customTimeValue.value = formatClockTime(now);
 }
 
 async function saveProfileFromForm() {
@@ -1861,53 +2047,7 @@ async function saveProfileFromForm() {
   await saveState();
 }
 
-async function handleTimeModeChange() {
-  const nextMode = timeModeCustom.checked ? 'custom' : 'system';
-  customTimeFields.classList.toggle('hidden', nextMode !== 'custom');
-
-  if (nextMode === 'system') {
-    profile = {
-      ...normalizedProfile(),
-      timeMode: 'system',
-      customClockBaseTimestamp: 0,
-      customClockStartedAt: 0
-    };
-    firedReminderKeys.clear();
-    lastReminderCheckValue = null;
-    await saveState();
-    await refreshSystemTime();
-  }
-}
-
-async function applyCustomTime() {
-  const date = normalizeDate(customTimeDate.value);
-  const time = clean(customTimeValue.value) || '00:00:00';
-  const timestamp = new Date(`${date}T${time.length === 5 ? `${time}:00` : time}`).getTime();
-  if (!date || Number.isNaN(timestamp)) {
-    setStatus('请先填写有效的自定义日期和时间。', '');
-    return;
-  }
-
-  profile = {
-    ...normalizedProfile(),
-    timeMode: 'custom',
-    customClockBaseTimestamp: timestamp,
-    customClockStartedAt: Date.now()
-  };
-  timeModeCustom.checked = true;
-  customTimeFields.classList.remove('hidden');
-  firedReminderKeys.clear();
-  lastReminderCheckValue = null;
-  await saveState();
-  await refreshSystemTime();
-}
-
 async function getEffectiveNow() {
-  const data = normalizedProfile();
-  if (data.timeMode === 'custom' && data.customClockBaseTimestamp && data.customClockStartedAt) {
-    return new Date(Number(data.customClockBaseTimestamp) + (Date.now() - Number(data.customClockStartedAt)));
-  }
-
   const result = await window.whbr.getSystemTime();
   return new Date(result.timestamp);
 }
@@ -2007,7 +2147,7 @@ function openResetModal() {
   deleteMode = 'all';
   resetTitle.textContent = '重置全部数据';
   resetDescription.textContent = '确认后会清空软件写入的全部本地数据，并清理旧版本浏览器存储。';
-  resetConfirmText.textContent = '我确认重置全部 RiZhi 数据';
+  resetConfirmText.textContent = '我确认重置全部日织数据';
   confirmResetButton.textContent = '确认重置';
   openConfirmModal();
 }

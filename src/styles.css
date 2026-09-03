@@ -152,6 +152,13 @@ button {
   margin-bottom: 24px;
 }
 
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
 .eyebrow {
   margin: 0 0 6px;
   color: var(--muted);
@@ -196,6 +203,10 @@ h2 {
 .clock strong {
   font-size: 18px;
   font-weight: 700;
+}
+
+.tutorial-button {
+  height: 42px;
 }
 
 .page {
@@ -723,20 +734,6 @@ h2 {
   min-height: 0;
   overflow-y: auto;
   padding-right: 6px;
-}
-
-.time-mode-group {
-  display: grid;
-  gap: 2px;
-  margin-top: 12px;
-}
-
-.custom-time-fields {
-  margin-top: 10px;
-}
-
-.custom-time-fields .primary-button {
-  margin-top: 14px;
 }
 
 .panel {
@@ -1267,6 +1264,95 @@ h2 {
   margin-top: 20px;
 }
 
+.tutorial-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  pointer-events: auto;
+}
+
+.tutorial-overlay.hidden {
+  display: none;
+}
+
+.tutorial-highlight {
+  position: fixed;
+  pointer-events: none;
+  border: 2px solid rgba(0, 0, 0, 0.34);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.2);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.78);
+  transition: left 0.18s ease, top 0.18s ease, width 0.18s ease, height 0.18s ease, opacity 0.18s ease;
+}
+
+.tutorial-highlight.hidden,
+.tutorial-arrow.hidden {
+  display: none;
+}
+
+.tutorial-arrow {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.tutorial-arrow line {
+  stroke: #c73939;
+  stroke-width: 3;
+  marker-end: url(#tutorialArrowHead);
+}
+
+.tutorial-arrow marker path {
+  fill: #c73939;
+}
+
+.tutorial-card {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  width: min(480px, calc(100vw - 56px));
+  gap: 10px;
+  padding: 22px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 20px 55px rgba(24, 30, 38, 0.24);
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+}
+
+.tutorial-card h2 {
+  margin-bottom: 0;
+  font-size: 22px;
+}
+
+.tutorial-card p {
+  margin-bottom: 0;
+  color: #405062;
+  line-height: 1.7;
+}
+
+.tutorial-counter {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.tutorial-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.tutorial-actions .hidden {
+  display: none;
+}
+
 @media (max-width: 980px) {
   body {
     min-width: 760px;
@@ -1291,5 +1377,10 @@ h2 {
 
   .section-head {
     display: grid;
+  }
+
+  .topbar-actions {
+    display: grid;
+    justify-items: end;
   }
 }
