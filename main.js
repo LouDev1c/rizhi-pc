@@ -8,8 +8,7 @@ const { getStoragePaths, loadData, resetData, saveData, setDataPath, setSettings
 const { autoUpdater } = require('electron-updater');
 
 const scheduleFileExtensions = ['xlsx', 'xls', 'csv', 'tsv'];
-const dailyFileExtensions = ['xlsx', 'xls', 'csv', 'tsv', 'pdf'];
-const allowedExtensions = new Set(dailyFileExtensions.map((extension) => `.${extension}`));
+const allowedExtensions = new Set(scheduleFileExtensions.map((extension) => `.${extension}`));
 const appIconPath = resolveAppIconPath();
 let mainWindow = null;
 let reminderWindow = null;
@@ -391,13 +390,12 @@ ipcMain.handle('dialog:messageBox', async (_event, options = {}) => {
 });
 
 ipcMain.handle('file:selectAndParse', async (_event, options = {}) => {
-  const isScheduleImport = options && options.kind === 'schedule';
-  const extensions = isScheduleImport ? scheduleFileExtensions : dailyFileExtensions;
+  const extensions = scheduleFileExtensions;
   const result = await dialog.showOpenDialog({
-    title: isScheduleImport ? '选择课表文件' : '选择每日安排表格文件',
+    title: '选择课表文件',
     properties: ['openFile'],
     filters: [
-      { name: isScheduleImport ? '课表文件' : '每日安排表格文件', extensions },
+      { name: '课表文件', extensions },
       { name: '表格文件', extensions }
     ]
   });
@@ -483,7 +481,7 @@ async function parseSelectedFile(filePath) {
   if (!allowedExtensions.has(ext)) {
     return {
       canceled: false,
-      error: '暂不支持该文件类型，请选择 xlsx、xls、csv、tsv 或 pdf 表格文件。',
+      error: '暂不支持该文件类型，请选择 xlsx、xls、csv 或 tsv 表格文件。',
       filePath,
       tasks: []
     };

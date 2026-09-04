@@ -1,6 +1,5 @@
 # Dependencies
 node_modules/
-dist/
 
 # Logs
 npm-debug.log*
@@ -12,6 +11,8 @@ pnpm-debug.log*
 dist/
 out/
 release/
+tools/
+copyright_materials/
 
 # Environment
 .env
@@ -22,3 +23,4 @@ release/
 Thumbs.db
 .vscode/
 .idea/
+

@@ -361,7 +361,7 @@ h2 {
 }
 
 .hidden {
-  display: none;
+  display: none !important;
 }
 
 .toolbar {
@@ -879,13 +879,99 @@ h2 {
   text-align: center;
 }
 
-.date-picker input {
+.date-picker input,
+.date-picker select {
   height: 40px;
   padding: 0 10px;
   border: 1px solid #cfd5dc;
   border-radius: 8px;
   background: #fbfcfd;
   color: var(--text);
+}
+
+.date-stepper {
+  position: relative;
+  width: 100%;
+}
+
+.compact-date-picker .date-stepper {
+  width: 184px;
+}
+
+.date-stepper input {
+  position: relative;
+  width: 100%;
+  padding-right: 74px;
+}
+
+.date-stepper input::-webkit-calendar-picker-indicator {
+  position: absolute;
+  right: 10px;
+  z-index: 2;
+  cursor: pointer;
+}
+
+.date-stepper-buttons {
+  position: absolute;
+  top: 50%;
+  right: 42px;
+  z-index: 3;
+  display: grid;
+  width: 18px;
+  height: 28px;
+  transform: translateY(-50%);
+}
+
+.date-step-button {
+  position: relative;
+  display: block;
+  width: 18px;
+  height: 14px;
+  border: 0;
+  background: transparent;
+  color: #69737f;
+  font-size: 0;
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+}
+
+.date-step-button::before,
+.date-step-button::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 8px;
+  height: 1.5px;
+  border-radius: 999px;
+  background: currentColor;
+  transform-origin: center;
+}
+
+.date-step-up::before {
+  transform: translate(-78%, -50%) rotate(-28deg);
+}
+
+.date-step-up::after {
+  transform: translate(-22%, -50%) rotate(28deg);
+}
+
+.date-step-down::before {
+  transform: translate(-78%, -50%) rotate(28deg);
+}
+
+.date-step-down::after {
+  transform: translate(-22%, -50%) rotate(-28deg);
+}
+
+.date-step-button:hover,
+.date-step-button:focus-visible {
+  color: var(--accent-dark);
+}
+
+.rating-picker {
+  min-width: 120px;
 }
 
 .journal-textarea {
@@ -931,6 +1017,20 @@ h2 {
   display: flex;
   align-items: end;
   gap: 10px;
+}
+
+.filter-toggle,
+.single-day-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  color: #3d4650;
+  font-size: 14px;
+}
+
+.single-day-toggle {
+  margin-left: auto;
 }
 
 .journal-item {

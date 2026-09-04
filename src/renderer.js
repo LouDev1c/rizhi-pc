@@ -10,6 +10,7 @@ const pages = {
   settings: document.querySelector('#settingsPage')
 };
 const TASK_TYPES = ['工作', '课程', '学习', '生活'];
+const JOURNAL_RATINGS = ['无', '一星', '二星', '三星', '四星', '五星'];
 const emptyState = document.querySelector('#emptyState');
 const taskWorkspace = document.querySelector('#taskWorkspace');
 const taskList = document.querySelector('#taskList');
@@ -21,9 +22,14 @@ const reusePreviousButton = document.querySelector('#reusePreviousButton');
 const importMoreButton = document.querySelector('#importMoreButton');
 const taskDateFilter = document.querySelector('#taskDateFilter');
 const journalDate = document.querySelector('#journalDate');
+const journalRating = document.querySelector('#journalRating');
 const journalContent = document.querySelector('#journalContent');
 const saveJournalButton = document.querySelector('#saveJournalButton');
 const journalSaveState = document.querySelector('#journalSaveState');
+const journalRatingFilterEnabled = document.querySelector('#journalRatingFilterEnabled');
+const journalRatingFilter = document.querySelector('#journalRatingFilter');
+const journalRatingFilterField = document.querySelector('#journalRatingFilterField');
+const journalViewDateField = document.querySelector('#journalViewDateField');
 const journalViewDate = document.querySelector('#journalViewDate');
 const openJournalDateButton = document.querySelector('#openJournalDateButton');
 const journalList = document.querySelector('#journalList');
@@ -50,18 +56,11 @@ const closeTaskEditModalButton = document.querySelector('#closeTaskEditModalButt
 const cancelTaskEditButton = document.querySelector('#cancelTaskEditButton');
 const taskDetails = document.querySelector('#taskDetails');
 const taskStatus = document.querySelector('#taskStatus');
-const importDateModal = document.querySelector('#importDateModal');
-const closeImportDateModalButton = document.querySelector('#closeImportDateModalButton');
-const cancelImportDateButton = document.querySelector('#cancelImportDateButton');
-const confirmImportDateButton = document.querySelector('#confirmImportDateButton');
-const importStartDate = document.querySelector('#importStartDate');
-const importEndDate = document.querySelector('#importEndDate');
 const importChoiceModal = document.querySelector('#importChoiceModal');
 const closeImportChoiceModalButton = document.querySelector('#closeImportChoiceModalButton');
 const manualScheduleButton = document.querySelector('#manualScheduleButton');
 const fileScheduleButton = document.querySelector('#fileScheduleButton');
 const manualDailyPlanButton = document.querySelector('#manualDailyPlanButton');
-const fileDailyPlanButton = document.querySelector('#fileDailyPlanButton');
 const scheduleTableModal = document.querySelector('#scheduleTableModal');
 const closeScheduleTableModalButton = document.querySelector('#closeScheduleTableModalButton');
 const termStartDate = document.querySelector('#termStartDate');
@@ -72,7 +71,12 @@ const cancelScheduleTableButton = document.querySelector('#cancelScheduleTableBu
 const saveScheduleTableButton = document.querySelector('#saveScheduleTableButton');
 const dailyPlanTableModal = document.querySelector('#dailyPlanTableModal');
 const closeDailyPlanTableModalButton = document.querySelector('#closeDailyPlanTableModalButton');
+const dailyPlanSingleDay = document.querySelector('#dailyPlanSingleDay');
+const dailyPlanSingleDateRow = document.querySelector('#dailyPlanSingleDateRow');
+const dailyPlanRangeRow = document.querySelector('#dailyPlanRangeRow');
 const dailyPlanDate = document.querySelector('#dailyPlanDate');
+const dailyPlanStartDate = document.querySelector('#dailyPlanStartDate');
+const dailyPlanEndDate = document.querySelector('#dailyPlanEndDate');
 const dailyPlanTableBody = document.querySelector('#dailyPlanTableBody');
 const addDailyPlanRowButton = document.querySelector('#addDailyPlanRowButton');
 const cancelDailyPlanTableButton = document.querySelector('#cancelDailyPlanTableButton');
@@ -116,13 +120,13 @@ let storagePaths = {
 let editingTaskId = '';
 let draggedTaskId = '';
 let deleteMode = 'all';
-let pendingImportResult = null;
 let highlightedTaskId = '';
 let currentEffectiveNow = new Date();
 let lastReminderCheckValue = null;
 let statusTimer = null;
 let tutorialStepIndex = 0;
 let previousTutorialPage = 'tasks';
+let appliedJournalRatingFilter = '无';
 const firedReminderKeys = new Set();
 const activePlanningDates = new Set();
 const tutorialSteps = [
@@ -130,7 +134,7 @@ const tutorialSteps = [
     page: 'tasks',
     targetSelector: '#importMoreButton',
     title: '批量创建任务',
-    text: '点击这个按钮，可手动填写或上传表格文件生成课表，也可以批量创建每日任务安排。'
+    text: '点击这个按钮，可手动填写或导入文件生成课表，也可以复用前一天或填写每日安排内容。'
   },
   {
     page: 'records',
@@ -175,6 +179,11 @@ navItems.forEach((item) => {
   });
 });
 
+document.querySelectorAll('.date-step-button').forEach((button) => {
+  button.addEventListener('mousedown', (event) => event.preventDefault());
+  button.addEventListener('click', handleDateStepButton);
+});
+
 if (tutorialButton) tutorialButton.addEventListener('click', openTutorialConfirmModal);
 if (tutorialConfirmNoButton) tutorialConfirmNoButton.addEventListener('click', closeTutorialConfirmModal);
 if (tutorialNoButton) tutorialNoButton.addEventListener('click', closeTutorialConfirmModal);
@@ -200,9 +209,6 @@ window.addEventListener('keydown', (event) => {
   }
   if (event.key === 'Escape' && !taskEditModal.classList.contains('hidden')) {
     closeTaskEditModal();
-  }
-  if (event.key === 'Escape' && !importDateModal.classList.contains('hidden')) {
-    closeImportDateModal();
   }
   if (event.key === 'Escape' && !importChoiceModal.classList.contains('hidden')) {
     closeImportChoiceModal();
@@ -230,11 +236,22 @@ importMoreButton.addEventListener('dragleave', handleDragLeave);
 importMoreButton.addEventListener('drop', handleDrop);
 taskDateFilter.addEventListener('change', renderTasks);
 journalDate.addEventListener('change', renderSelectedJournal);
+if (journalRatingFilterEnabled) journalRatingFilterEnabled.addEventListener('change', updateJournalFilterControls);
 saveJournalButton.addEventListener('click', saveSelectedJournal);
-journalViewDate.addEventListener('change', () => {
-  if (journalViewDate.value) openJournalForDate(journalViewDate.value);
+journalViewDate.addEventListener('blur', commitJournalViewDate);
+journalViewDate.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    journalViewDate.blur();
+  }
 });
 openJournalDateButton.addEventListener('click', () => {
+  commitJournalViewDate();
+  if (journalRatingFilterEnabled && journalRatingFilterEnabled.checked) {
+    appliedJournalRatingFilter = normalizeJournalRating(journalRatingFilter ? journalRatingFilter.value : '无');
+    renderJournalList();
+    return;
+  }
   if (journalViewDate.value) openJournalForDate(journalViewDate.value);
 });
 chooseDataPathButton.addEventListener('click', chooseDataPath);
@@ -256,17 +273,10 @@ cancelTaskEditButton.addEventListener('click', closeTaskEditModal);
 taskEditModal.addEventListener('click', (event) => {
   if (event.target === taskEditModal) closeTaskEditModal();
 });
-closeImportDateModalButton.addEventListener('click', closeImportDateModal);
-cancelImportDateButton.addEventListener('click', closeImportDateModal);
-confirmImportDateButton.addEventListener('click', confirmImportWithDateRange);
-importDateModal.addEventListener('click', (event) => {
-  if (event.target === importDateModal) closeImportDateModal();
-});
 closeImportChoiceModalButton.addEventListener('click', closeImportChoiceModal);
 manualScheduleButton.addEventListener('click', () => openScheduleTableModal());
-fileScheduleButton.addEventListener('click', () => importScheduleFile('schedule'));
+fileScheduleButton.addEventListener('click', importScheduleFile);
 manualDailyPlanButton.addEventListener('click', openDailyPlanTableModal);
-fileDailyPlanButton.addEventListener('click', () => importScheduleFile('daily'));
 importChoiceModal.addEventListener('click', (event) => {
   if (event.target === importChoiceModal) closeImportChoiceModal();
 });
@@ -281,6 +291,9 @@ closeDailyPlanTableModalButton.addEventListener('click', closeDailyPlanTableModa
 cancelDailyPlanTableButton.addEventListener('click', closeDailyPlanTableModal);
 addDailyPlanRowButton.addEventListener('click', () => addDailyPlanRow());
 saveDailyPlanTableButton.addEventListener('click', saveDailyPlanTable);
+if (dailyPlanSingleDay) dailyPlanSingleDay.addEventListener('change', syncDailyPlanDateMode);
+if (dailyPlanStartDate) dailyPlanStartDate.addEventListener('change', constrainDailyPlanEndDate);
+if (dailyPlanEndDate) dailyPlanEndDate.addEventListener('change', constrainDailyPlanEndDate);
 dailyPlanTableModal.addEventListener('click', (event) => {
   if (event.target === dailyPlanTableModal) closeDailyPlanTableModal();
 });
@@ -426,20 +439,34 @@ function currentPageKey() {
   return Object.entries(pages).find(([, page]) => page.classList.contains('active'))?.[0] || 'tasks';
 }
 
-async function importScheduleFile(kind = 'daily') {
-  setStatus(kind === 'schedule'
-    ? '请选择要导入的课表文件，仅支持 xlsx、xls、csv 或 tsv。'
-    : '请选择要导入的每日安排表格文件，仅支持 xlsx、xls、csv、tsv 或 pdf。', '');
+function handleDateStepButton(event) {
+  const button = event.currentTarget;
+  const input = document.querySelector(`#${button.dataset.dateStepFor}`);
+  const offsetDays = Number(button.dataset.dateStep);
+  if (!input || !Number.isFinite(offsetDays)) return;
+
+  const currentDate = normalizeDate(input.value) || formatLocalDate(currentEffectiveNow || new Date());
+  const nextDate = shiftDate(currentDate, offsetDays);
+  if (!nextDate) return;
+
+  input.value = nextDate;
+  input.blur();
+  button.blur();
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+async function importScheduleFile() {
+  setStatus('请选择要导入的课表文件，仅支持 xlsx、xls、csv 或 tsv。', '');
   closeImportChoiceModal();
 
   try {
-    const selectedFile = await window.whbr.selectAndParseFile({ kind });
+    const selectedFile = await window.whbr.selectAndParseFile({ kind: 'schedule' });
     if (selectedFile.canceled) {
       setStatus('已取消导入。', '', 2500);
       return;
     }
 
-    const result = await parseSelectedImportFile(selectedFile, kind);
+    const result = await parseSelectedImportFile(selectedFile);
 
     if (result.message) {
       setStatus(result.message, result.status === 'ok' ? 'hidden' : '');
@@ -450,53 +477,27 @@ async function importScheduleFile(kind = 'daily') {
       return;
     }
 
-    if (!validateImportKind(result, kind)) return;
+    if (!validateImportKind(result)) return;
 
-    await handleParsedImport(result, kind);
+    await handleParsedImport(result);
   } catch (error) {
     setStatus(`导入失败：${error.message}`, '');
   }
 }
 
 async function importDroppedFile(file) {
-  setStatus('正在读取拖入的文件……', '');
-
-  try {
-    const filePath = window.whbr.getPathForFile(file);
-    if (!filePath) {
-      setStatus('无法读取拖入文件的本地路径，请点击“批量创建任务”选择文件。', '');
-      return;
-    }
-
-    const result = await parseSelectedImportFile({ filePath, fileName: file.name || filePath.split(/[\\/]/).pop() });
-    if (result.error) {
-      setStatus(result.error, '');
-      return;
-    }
-
-    if (result.message) {
-      setStatus(result.message, result.status === 'ok' ? 'hidden' : '');
-    }
-
-    if (!validateImportKind(result, 'daily')) return;
-
-    await handleParsedImport(result, 'daily');
-  } catch (error) {
-    setStatus(`拖拽导入失败：${error.message}`, '');
-  }
+  setStatus(`已忽略 ${file && file.name ? file.name : '拖入的文件'}。每日安排不再支持文件导入，请在“批量创建任务”中选择“填写安排内容”。`, '', 6000);
 }
 
-async function parseSelectedImportFile(file, kind = 'daily') {
+async function parseSelectedImportFile(file) {
   const fileName = file.fileName || file.filePath.split(/[\\/]/).pop();
   const ext = fileName.split('.').pop().toLowerCase();
-  const isExcel = ['xlsx', 'xls'].includes(ext);
-  const isPdf = ext === 'pdf';
-  const isScheduleUnsupported = kind === 'schedule' && !['xlsx', 'xls', 'csv', 'tsv'].includes(ext);
+  const isScheduleUnsupported = !['xlsx', 'xls', 'csv', 'tsv'].includes(ext);
 
   if (isScheduleUnsupported) {
     return {
       canceled: false,
-      error: '课表入口目前只支持 xlsx、xls、csv 或 tsv 文件。PDF 课表暂不在 v0.1.3 支持范围内。',
+      error: '课表入口目前只支持 xlsx、xls、csv 或 tsv 文件。PDF 课表暂不在 v0.2.0 支持范围内。',
       filePath: file.filePath,
       fileName,
       tasks: []
@@ -506,48 +507,31 @@ async function parseSelectedImportFile(file, kind = 'daily') {
   setStatus(`已选择 ${fileName}，正在读取文件……`, '');
   await waitForPaint();
 
-  setStatus(kind === 'schedule'
-    ? '正在转化中……正在读取课表文件。'
-    : isPdf
-      ? '正在转化中……正在读取 PDF 表格。'
-      : isExcel
-      ? '正在转化中……正在读取 Excel 工作表。'
-      : '正在转化中……正在读取表格内容。', '');
+  setStatus('正在转化中……正在读取课表文件。', '');
   await waitForPaint();
 
   const result = await window.whbr.parseFilePath(file.filePath);
 
-  setStatus(kind === 'schedule'
-    ? '正在整理课表文件解析结果，准备预填课表。'
-    : '正在整理表格解析结果，准备写入任务。', '');
+  setStatus('正在整理课表文件解析结果，准备预填课表。', '');
   await waitForPaint();
 
   return result;
 }
 
-function validateImportKind(result, kind = 'daily') {
+function validateImportKind(result) {
   const importedTasks = Array.isArray(result.tasks) ? result.tasks : [];
   const hasTimetable = hasImportedTimetable(result);
   const isTable = result.sourceType === 'table';
 
-  if (kind === 'schedule') {
-    if (!isTable) {
-      setStatus('课表入口目前只支持 xlsx、xls、csv 或 tsv 文件。', '');
-      return false;
-    }
-
-    if (!hasTimetable) {
-      setStatus(importedTasks.length > 0
-        ? '这个文件看起来是每日安排，不是学期课表。请从“每日安排”的导入安排文件入口上传。'
-        : '没有识别到课表网格。请上传包含周一至周日列的课表文件。', '');
-      return false;
-    }
-
-    return true;
+  if (!isTable) {
+    setStatus('课表入口目前只支持 xlsx、xls、csv 或 tsv 文件。', '');
+    return false;
   }
 
-  if (hasTimetable) {
-    setStatus('这个文件看起来是学期课表，不是每日安排。请从“课表”的导入课表文件入口上传。', '');
+  if (!hasTimetable) {
+    setStatus(importedTasks.length > 0
+      ? '这个文件看起来是每日安排，不是学期课表。每日安排请使用“填写安排内容”。'
+      : '没有识别到课表网格。请上传包含周一至周日列的课表文件。', '');
     return false;
   }
 
@@ -567,111 +551,9 @@ function waitForPaint() {
   });
 }
 
-async function handleParsedImport(result, kind = 'daily') {
+async function handleParsedImport(result) {
   const importedTasks = Array.isArray(result.tasks) ? result.tasks : [];
-  const importedJournals = Array.isArray(result.journals) ? result.journals : [];
-  if (kind === 'schedule') {
-    openScheduleTableModal(result.timetableTemplate || templateFromScheduleTasks(importedTasks), result);
-    return;
-  }
-
-  if (importedTasks.length === 0) {
-    const resolvedJournals = await resolveImportedJournals(importedJournals);
-    if (resolvedJournals === null) {
-      setStatus('已取消导入。', '', 2500);
-      return;
-    }
-    journals = resolvedJournals;
-    await saveState();
-    renderAll();
-    return;
-  }
-
-  if (shouldAskImportDateRange(result, importedTasks)) {
-    pendingImportResult = result;
-    openImportDateModal(result);
-    return;
-  }
-
-  const resolvedTasks = await resolveImportedTasks(importedTasks);
-  if (resolvedTasks === null) {
-    setStatus('已取消导入。', '', 2500);
-    return;
-  }
-
-  const resolvedJournals = await resolveImportedJournals(importedJournals);
-  if (resolvedJournals === null) {
-    setStatus('已取消导入。', '', 2500);
-    return;
-  }
-  tasks = resolvedTasks.tasks;
-  journals = resolvedJournals;
-  await saveState();
-  renderAll();
-  setStatus(`已导入 ${resolvedTasks.importedCount} 条安排。`, 'hidden');
-}
-
-function shouldAskImportDateRange(result, importedTasks) {
-  const datedSheetCount = Number(result.datedSheetCount || 0);
-  const distinctDates = new Set(importedTasks.map((task) => normalizeDate(task.date)).filter(Boolean));
-  if (result.sourceType === 'table' && datedSheetCount > 1 && distinctDates.size > 1) return false;
-  return distinctDates.size <= 1;
-}
-
-function openImportDateModal(result) {
-  const inferredDate = firstTaskDate(result.tasks || []);
-  const defaultDate = inferredDate || taskDateFilter.value || formatLocalDate(new Date());
-  importStartDate.value = defaultDate;
-  importEndDate.value = defaultDate;
-  setStatus(`已解析出 ${result.tasks.length} 条安排，请选择这些安排的生效日期。`, '');
-  importDateModal.classList.remove('hidden');
-  importStartDate.focus();
-}
-
-function firstTaskDate(taskItems) {
-  const task = taskItems.find((item) => normalizeDate(item.date));
-  return task ? normalizeDate(task.date) : '';
-}
-
-function closeImportDateModal() {
-  pendingImportResult = null;
-  importDateModal.classList.add('hidden');
-}
-
-async function confirmImportWithDateRange() {
-  if (!pendingImportResult) return;
-
-  const startDate = normalizeDate(importStartDate.value);
-  const endDate = normalizeDate(importEndDate.value || importStartDate.value);
-  const dates = enumerateDates(startDate, endDate);
-  if (dates.length === 0) {
-    setStatus('请选择有效的开始和结束日期。', '');
-    return;
-  }
-
-  const expandedTasks = expandTasksAcrossDates(pendingImportResult.tasks || [], dates);
-  const resolvedTasks = await resolveImportedTasks(expandedTasks);
-  if (resolvedTasks === null) {
-    closeImportDateModal();
-    setStatus('已取消导入。', '', 2500);
-    return;
-  }
-
-  const resolvedJournals = await resolveImportedJournals(pendingImportResult.journals || []);
-  if (resolvedJournals === null) {
-    closeImportDateModal();
-    setStatus('已取消导入。', '', 2500);
-    return;
-  }
-
-  tasks = resolvedTasks.tasks;
-  journals = resolvedJournals;
-  taskDateFilter.value = dates[0];
-  activePlanningDates.add(dates[0]);
-  await saveState();
-  closeImportDateModal();
-  renderAll();
-  setStatus(`已导入 ${resolvedTasks.importedCount} 条安排，日期范围 ${dates[0]} 至 ${dates[dates.length - 1]}。`, 'hidden');
+  openScheduleTableModal(result.timetableTemplate || templateFromScheduleTasks(importedTasks), result);
 }
 
 function openImportChoiceModal() {
@@ -923,7 +805,12 @@ function markScheduleTimeConflicts(rows) {
 
 function openDailyPlanTableModal() {
   closeImportChoiceModal();
-  dailyPlanDate.value = taskDateFilter.value || formatLocalDate(currentEffectiveNow);
+  const defaultDate = taskDateFilter.value || formatLocalDate(currentEffectiveNow);
+  dailyPlanSingleDay.checked = true;
+  dailyPlanDate.value = defaultDate;
+  dailyPlanStartDate.value = defaultDate;
+  dailyPlanEndDate.value = defaultDate;
+  syncDailyPlanDateMode();
   dailyPlanTableBody.innerHTML = '';
   addDailyPlanRow('09:00-11:30');
   addDailyPlanRow('14:00-17:30');
@@ -956,14 +843,39 @@ function addDailyPlanRow(timeRange = '') {
   dailyPlanTableBody.appendChild(row);
 }
 
-async function saveDailyPlanTable() {
-  const date = normalizeDate(dailyPlanDate.value);
-  if (!date) {
-    setStatus('请先选择每日安排日期。', '');
+function syncDailyPlanDateMode() {
+  const singleDay = Boolean(dailyPlanSingleDay && dailyPlanSingleDay.checked);
+  dailyPlanSingleDateRow.classList.toggle('hidden', !singleDay);
+  dailyPlanRangeRow.classList.toggle('hidden', singleDay);
+
+  if (singleDay) {
+    dailyPlanDate.value = dailyPlanDate.value || dailyPlanStartDate.value || taskDateFilter.value || formatLocalDate(currentEffectiveNow);
     return;
   }
 
-  const newTasks = Array.from(dailyPlanTableBody.querySelectorAll('tr'))
+  const fallbackDate = dailyPlanDate.value || taskDateFilter.value || formatLocalDate(currentEffectiveNow);
+  dailyPlanStartDate.value = dailyPlanStartDate.value || fallbackDate;
+  dailyPlanEndDate.value = dailyPlanEndDate.value || dailyPlanStartDate.value;
+  constrainDailyPlanEndDate();
+}
+
+function constrainDailyPlanEndDate() {
+  if (!dailyPlanStartDate || !dailyPlanEndDate) return;
+  const startDate = normalizeDate(dailyPlanStartDate.value);
+  dailyPlanEndDate.min = startDate || '';
+  if (startDate && normalizeDate(dailyPlanEndDate.value) && normalizeDate(dailyPlanEndDate.value) < startDate) {
+    dailyPlanEndDate.value = startDate;
+  }
+}
+
+async function saveDailyPlanTable() {
+  const dates = selectedDailyPlanDates();
+  if (dates.length === 0) {
+    setStatus('请先选择有效的安排日期。', '');
+    return;
+  }
+
+  const planRows = Array.from(dailyPlanTableBody.querySelectorAll('tr'))
     .map((row, index) => {
       const timeInput = row.querySelector('td:nth-child(1) input');
       const titleInput = row.querySelector('td:nth-child(2) input');
@@ -973,37 +885,62 @@ async function saveDailyPlanTable() {
       if (!timeRange || !title) return null;
 
       return {
-        id: `daily-${Date.now()}-${index}`,
         title,
-        startTime: timeRange.startTime,
-        endTime: timeRange.endTime,
+        timeRange,
+        type: normalizeTaskType(typeSelect.value, title),
+        index
+      };
+    })
+    .filter(Boolean);
+
+  if (planRows.length === 0) {
+    setStatus('请至少填写一条有效的时间段和任务。', '');
+    return;
+  }
+
+  const orderCounters = new Map();
+  const newTasks = [];
+  dates.forEach((date) => {
+    planRows.forEach((planRow) => {
+      newTasks.push({
+        id: `daily-${Date.now()}-${date}-${planRow.index}`,
+        title: planRow.title,
+        startTime: planRow.timeRange.startTime,
+        endTime: planRow.timeRange.endTime,
         date,
         weekday: weekdayFromDate(date),
         location: '',
-        type: normalizeTaskType(typeSelect.value, title),
+        type: planRow.type,
         planDetails: '',
         details: '',
         status: '未评价',
         rawText: '',
         sheetName: '手动安排',
-        order: nextOrderForDate(date) + index * 10,
+        order: nextOrderForDate(date, orderCounters) + planRow.index * 10,
         isDraft: false
-      };
-    })
-    .filter(Boolean);
-
-  if (newTasks.length === 0) {
-    setStatus('请至少填写一条有效的时间段和任务。', '');
-    return;
-  }
+      });
+    });
+  });
 
   tasks = mergeTasks(tasks, newTasks);
-  taskDateFilter.value = date;
-  activePlanningDates.add(date);
+  taskDateFilter.value = dates[0];
+  dates.forEach((date) => activePlanningDates.add(date));
   await saveState();
   closeDailyPlanTableModal();
   renderAll();
-  setStatus(`已生成 ${newTasks.length} 条当日安排。`, 'hidden');
+  setStatus(dates.length === 1
+    ? `已生成 ${newTasks.length} 条当日安排。`
+    : `已生成 ${dates[0]} 至 ${dates[dates.length - 1]} 的 ${newTasks.length} 条安排。`, 'hidden');
+}
+
+function selectedDailyPlanDates() {
+  if (dailyPlanSingleDay && dailyPlanSingleDay.checked) {
+    const date = normalizeDate(dailyPlanDate.value);
+    return date ? [date] : [];
+  }
+
+  constrainDailyPlanEndDate();
+  return enumerateDates(normalizeDate(dailyPlanStartDate.value), normalizeDate(dailyPlanEndDate.value));
 }
 
 function handleDragOver(event) {
@@ -1704,140 +1641,13 @@ function ensureSelectedDate() {
   return clean(taskDateFilter.value);
 }
 
-async function resolveImportedTasks(importedTasks) {
-  const validTasks = importedTasks.filter((task) => {
-    return normalizeDate(task.date) && clean(task.title) && timeToMinutes(task.startTime) !== null && timeToMinutes(task.endTime) !== null;
-  });
-  if (validTasks.length === 0) {
-    return {
-      tasks,
-      importedCount: 0
-    };
-  }
-
-  const conflicts = findImportTaskConflicts(tasks, validTasks);
-  if (conflicts.importedIds.size === 0) {
-    return {
-      tasks: mergeTasks(tasks, validTasks),
-      importedCount: validTasks.length
-    };
-  }
-
-  const result = await window.whbr.showMessageBox({
-    type: 'question',
-    title: '任务时间冲突',
-    message: `导入安排中有 ${conflicts.importedIds.size} 条与已有任务时间重叠，是否更新？`,
-    detail: `${formatImportConflictSummary(conflicts)}\n\n选择“更新”会删除已有的冲突任务，并写入导入任务；选择“保留原来的”会跳过导入中冲突的任务。`,
-    buttons: ['更新', '保留原来的', '取消导入'],
-    defaultId: 1,
-    cancelId: 2,
-    noLink: true
-  });
-
-  if (result.response === 2) return null;
-
-  if (result.response === 1) {
-    const filteredImportedTasks = validTasks.filter((task) => !conflicts.importedIds.has(task.id));
-    return {
-      tasks: mergeTasks(tasks, filteredImportedTasks),
-      importedCount: filteredImportedTasks.length
-    };
-  }
-
-  const updatedTasks = tasks.filter((task) => !conflicts.existingIds.has(task.id));
-  return {
-    tasks: mergeTasks(updatedTasks, validTasks),
-    importedCount: validTasks.length
-  };
-}
-
-function findImportTaskConflicts(existingTasks, importedTasks) {
-  const existingIds = new Set();
-  const importedIds = new Set();
-  const pairs = [];
-
-  importedTasks.forEach((importedTask) => {
-    const importedDate = normalizeDate(importedTask.date);
-    const importedIntervals = rangeToComparableIntervals(importedTask.startTime, importedTask.endTime);
-    if (!importedDate || importedIntervals.length === 0) return;
-
-    existingTasks.forEach((existingTask) => {
-      if (!existingTask.id || normalizeDate(existingTask.date) !== importedDate || !isRenderableTask(existingTask)) return;
-      const existingIntervals = rangeToComparableIntervals(existingTask.startTime, existingTask.endTime);
-      if (existingIntervals.length === 0 || !rangesOverlap(importedIntervals, existingIntervals)) return;
-
-      existingIds.add(existingTask.id);
-      importedIds.add(importedTask.id);
-      pairs.push({ date: importedDate, existingTask, importedTask });
-    });
-  });
-
-  return { existingIds, importedIds, pairs };
-}
-
-function formatImportConflictSummary(conflicts) {
-  const lines = conflicts.pairs.slice(0, 5).map(({ date, existingTask, importedTask }) => {
-    return `${date}：已有「${formatTaskBrief(existingTask)}」/ 导入「${formatTaskBrief(importedTask)}」`;
-  });
-  if (conflicts.pairs.length > 5) lines.push(`另有 ${conflicts.pairs.length - 5} 处冲突`);
-  return lines.join('\n');
-}
-
-function formatTaskBrief(task) {
-  return `${task.startTime || '--:--'}-${task.endTime || '--:--'} ${clean(task.title) || '未命名安排'}`;
-}
-
-async function resolveImportedJournals(importedJournals) {
-  const validJournals = importedJournals.filter((journal) => clean(journal.content) && journalPrimaryDate(journal));
-  if (validJournals.length === 0) return journals;
-
-  const conflictedDates = journalConflictDates(journals, validJournals);
-  if (conflictedDates.length === 0) return mergeJournals(journals, validJournals);
-
-  const result = await window.whbr.showMessageBox({
-    type: 'question',
-    title: '每日记录已存在',
-    message: `已存在 ${conflictedDates.length} 天的每日记录，如何处理？`,
-    detail: `冲突日期：${conflictedDates.slice(0, 8).join('、')}${conflictedDates.length > 8 ? ' 等' : ''}`,
-    buttons: ['覆盖', '保留原来的', '取消上传'],
-    defaultId: 1,
-    cancelId: 2,
-    noLink: true
-  });
-
-  if (result.response === 2) return null;
-
-  if (result.response === 1) {
-    return mergeJournals(journals, validJournals.filter((journal) => {
-      return !journalDates(journal).some((date) => conflictedDates.includes(date));
-    }));
-  }
-
-  const importDates = new Set(validJournals.flatMap(journalDates));
-  const withoutConflicted = journals.filter((journal) => {
-    return !journalDates(journal).some((date) => importDates.has(date));
-  });
-  return mergeJournals(withoutConflicted, validJournals);
-}
-
-function journalConflictDates(currentJournals, importedJournals) {
-  const currentDates = new Set(currentJournals.flatMap(journalDates));
-  return Array.from(new Set(importedJournals.flatMap(journalDates).filter((date) => currentDates.has(date)))).sort();
-}
-
-function journalDates(journal) {
-  const { start, end } = journalDateRange(journal);
-  if (!start) return [];
-  if (!end || start === end) return [start];
-  return enumerateDates(start, end);
-}
-
 function mergeJournals(currentJournals, importedJournals) {
   const journalMap = new Map(currentJournals.map((journal) => [journalIdentity(journal), journal]));
 
   importedJournals.forEach((journal) => {
     const key = journalIdentity(journal);
-    if (!key || !journal.content) return;
+    const rating = normalizeJournalRating(journal.rating);
+    if (!key || (!journal.content && rating === '无')) return;
 
     journalMap.set(key, {
       id: journal.id || `journal-${Date.now()}`,
@@ -1846,6 +1656,7 @@ function mergeJournals(currentJournals, importedJournals) {
       dateRangeEnd: normalizeDate(journal.dateRangeEnd),
       sheetName: clean(journal.sheetName),
       content: clean(journal.content),
+      rating,
       source: clean(journal.source) || 'manual',
       updatedAt: new Date().toISOString()
     });
@@ -1861,6 +1672,7 @@ function normalizeJournalCollection(items) {
 async function saveSelectedJournal() {
   const date = clean(journalDate.value);
   const content = clean(journalContent.value);
+  const rating = normalizeJournalRating(journalRating ? journalRating.value : '无');
 
   if (!date) {
     journalSaveState.textContent = '请先选择日期';
@@ -1872,10 +1684,11 @@ async function saveSelectedJournal() {
     date,
     sheetName: '',
     content,
+    rating,
     source: 'manual'
   }]);
 
-  if (!content) {
+  if (!content && rating === '无') {
     journals = journals.filter((journal) => journalPrimaryDate(journal) !== date);
   }
 
@@ -1888,6 +1701,7 @@ function renderSelectedJournal() {
   const date = clean(journalDate.value);
   const journal = findJournalForDate(normalizeDate(date), date);
   journalContent.value = journal ? journal.content : '';
+  if (journalRating) journalRating.value = normalizeJournalRating(journal && journal.rating);
   journalSaveState.textContent = journal ? '已加载' : '尚未保存';
 }
 
@@ -1895,15 +1709,19 @@ function renderJournalList() {
   ensureJournalViewDate();
   journalList.innerHTML = '';
 
-  if (journals.length === 0) {
+  const visibleJournals = filteredJournalsForList();
+
+  if (visibleJournals.length === 0) {
     const empty = document.createElement('p');
     empty.className = 'muted';
-    empty.textContent = '还没有每日记录。可以手动保存，也可以从表格文件中的记录内容或批注导入。';
+    empty.textContent = journals.length === 0
+      ? '还没有每日记录。可以手动保存，也可以从表格文件中的记录内容或批注导入。'
+      : '没有符合当前筛选条件的记录。';
     journalList.appendChild(empty);
     return;
   }
 
-  journals.forEach((journal) => {
+  visibleJournals.forEach((journal) => {
     const item = document.createElement('button');
     item.className = 'journal-item';
     item.type = 'button';
@@ -1912,17 +1730,42 @@ function renderJournalList() {
     });
 
     const title = document.createElement('strong');
-    title.textContent = journalDisplayDate(journal);
+    title.textContent = `${journalDisplayDate(journal)}${journalRatingText(journal)}`;
     const preview = document.createElement('span');
-    preview.textContent = journal.content;
+    preview.textContent = journal.content || '这一天还没有填写生活记录。';
     item.append(title, preview);
     journalList.appendChild(item);
   });
 }
 
+function filteredJournalsForList() {
+  if (!journalRatingFilterEnabled || !journalRatingFilterEnabled.checked) return journals;
+  return journals.filter((journal) => normalizeJournalRating(journal.rating) === appliedJournalRatingFilter);
+}
+
+function updateJournalFilterControls() {
+  const filterEnabled = Boolean(journalRatingFilterEnabled && journalRatingFilterEnabled.checked);
+  if (journalRatingFilter) journalRatingFilter.disabled = !filterEnabled;
+  if (journalRatingFilterField) journalRatingFilterField.classList.toggle('hidden', !filterEnabled);
+  if (journalViewDateField) journalViewDateField.classList.toggle('hidden', filterEnabled);
+}
+
+function journalRatingText(journal) {
+  const rating = normalizeJournalRating(journal && journal.rating);
+  return rating === '无' ? '' : ` · ${rating}`;
+}
+
 function ensureJournalViewDate() {
   if (journalViewDate.value) return;
   journalViewDate.value = latestJournalDate() || formatLocalDate(currentEffectiveNow || new Date());
+}
+
+function commitJournalViewDate() {
+  if (!journalViewDate.value) return;
+  const normalizedDate = normalizeDate(journalViewDate.value);
+  if (normalizedDate) {
+    journalViewDate.value = normalizedDate;
+  }
 }
 
 function openJournalEntry(journal) {
@@ -1939,7 +1782,8 @@ function openJournalForDate(date) {
 function renderJournalView(journal, targetDate, fallbackTitle) {
   const normalizedDate = normalizeDate(targetDate);
   const dayTasks = sortTasksForDisplay(tasks.filter((task) => normalizeDate(task.date) === normalizedDate));
-  journalViewTitle.textContent = fallbackTitle || (journal ? journalDisplayDate(journal) : normalizedDate || '未标记日期');
+  const title = fallbackTitle || (journal ? journalDisplayDate(journal) : normalizedDate || '未标记日期');
+  journalViewTitle.textContent = `${title}${journal ? journalRatingText(journal) : ''}`;
   journalViewContent.innerHTML = '';
 
   const journalSection = document.createElement('section');
@@ -2084,6 +1928,11 @@ function normalizeDate(value) {
   return `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`;
 }
 
+function normalizeJournalRating(value) {
+  const rating = clean(value) || '无';
+  return JOURNAL_RATINGS.includes(rating) ? rating : '无';
+}
+
 function enumerateDates(startDate, endDate) {
   const start = parseLocalDate(startDate);
   const end = parseLocalDate(endDate);
@@ -2096,22 +1945,6 @@ function enumerateDates(startDate, endDate) {
     cursor.setDate(cursor.getDate() + 1);
   }
   return dates;
-}
-
-function expandTasksAcrossDates(taskItems, dates) {
-  const expanded = [];
-  dates.forEach((date) => {
-    taskItems.forEach((task, index) => {
-      expanded.push({
-        ...task,
-        id: `import-${Date.now()}-${date}-${index}`,
-        date,
-        weekday: weekdayFromDate(date),
-        order: nextOrderForDate(date) + index * 10
-      });
-    });
-  });
-  return expanded;
 }
 
 function extractTimeRangeFromInput(value) {
@@ -2219,6 +2052,7 @@ function taskIdentity(task) {
 function isRenderableTask(task) {
   const title = clean(task.title);
   if (task.isDraft) return true;
+  if (task.source === 'untimed-table') return Boolean(title);
   if (!task.startTime || !task.endTime) return false;
   if (!title) return false;
   if (normalizeTaskType(task.type, title) === '课程') return true;
@@ -2293,7 +2127,7 @@ function defaultProfile() {
     classBreakLength: 10,
     workFocusLength: 50,
     workBreakLength: 10,
-    defaultsVersion: '0.1.3'
+    defaultsVersion: '0.2.0'
   };
 }
 
@@ -2361,6 +2195,7 @@ async function initializeAppData() {
     if (migratedProfile.changed) await saveState();
     updateStoragePathView();
     renderAll();
+    updateJournalFilterControls();
   } catch (error) {
     setStatus(`加载数据失败：${error.message}`, '');
   }
@@ -2369,7 +2204,7 @@ async function initializeAppData() {
 function migrateProfileDefaults(profileData) {
   const migrated = { ...profileData };
   let changed = false;
-  if (migrated.defaultsVersion !== '0.1.3') {
+  if (migrated.defaultsVersion !== '0.2.0') {
     if (Number(migrated.classDuration) === 45) {
       migrated.classDuration = 50;
       changed = true;
@@ -2382,7 +2217,7 @@ function migrateProfileDefaults(profileData) {
       migrated.focusLength = 50;
       changed = true;
     }
-    migrated.defaultsVersion = '0.1.3';
+    migrated.defaultsVersion = '0.2.0';
     changed = true;
   }
   return { profile: migrated, changed };

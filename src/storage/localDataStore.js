@@ -567,8 +567,14 @@ function normalizeJournalForStorage(journal) {
     ...journal,
     date,
     dateRangeStart,
-    dateRangeEnd
+    dateRangeEnd,
+    rating: normalizeJournalRating(journal && journal.rating)
   };
+}
+
+function normalizeJournalRating(value) {
+  const rating = String(value || '').trim() || '无';
+  return ['无', '一星', '二星', '三星', '四星', '五星'].includes(rating) ? rating : '无';
 }
 
 function collectDateMonths(startDate, endDate = '') {

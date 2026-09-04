@@ -68,7 +68,13 @@
               <div class="toolbar-actions">
                 <label class="compact-date-picker">
                   <span>查看日期</span>
-                  <input id="taskDateFilter" type="date" />
+                  <div class="date-stepper">
+                    <input id="taskDateFilter" type="date" />
+                    <div class="date-stepper-buttons" aria-hidden="false">
+                      <button class="date-step-button date-step-up" type="button" data-date-step-for="taskDateFilter" data-date-step="-1" aria-label="前一天"></button>
+                      <button class="date-step-button date-step-down" type="button" data-date-step-for="taskDateFilter" data-date-step="1" aria-label="后一天"></button>
+                    </div>
+                  </div>
                 </label>
                 <button id="importMoreButton" class="secondary-button">批量创建任务</button>
               </div>
@@ -129,9 +135,26 @@
                   <h2>每日生活记录</h2>
                   <p class="muted">按日期记录当天发生的事、状态和复盘内容。</p>
                 </div>
+                <label class="date-picker rating-picker">
+                  <span>星级</span>
+                  <select id="journalRating">
+                    <option value="无">无</option>
+                    <option value="一星">一星</option>
+                    <option value="二星">二星</option>
+                    <option value="三星">三星</option>
+                    <option value="四星">四星</option>
+                    <option value="五星">五星</option>
+                  </select>
+                </label>
                 <label class="date-picker">
                   <span>日期</span>
-                  <input id="journalDate" type="date" />
+                  <div class="date-stepper">
+                    <input id="journalDate" type="date" />
+                    <div class="date-stepper-buttons" aria-hidden="false">
+                      <button class="date-step-button date-step-up" type="button" data-date-step-for="journalDate" data-date-step="-1" aria-label="前一天"></button>
+                      <button class="date-step-button date-step-down" type="button" data-date-step-for="journalDate" data-date-step="1" aria-label="后一天"></button>
+                    </div>
+                  </div>
                 </label>
               </div>
 
@@ -149,9 +172,30 @@
                   <h2>记录列表</h2>
                 </div>
                 <div class="record-filter">
-                  <label class="date-picker">
+                  <label class="filter-toggle">
+                    <input id="journalRatingFilterEnabled" type="checkbox" />
+                    <span>筛选</span>
+                  </label>
+                  <label id="journalRatingFilterField" class="date-picker rating-picker hidden">
+                    <span>筛选</span>
+                    <select id="journalRatingFilter">
+                      <option value="无">无</option>
+                      <option value="一星">一星</option>
+                      <option value="二星">二星</option>
+                      <option value="三星">三星</option>
+                      <option value="四星">四星</option>
+                      <option value="五星">五星</option>
+                    </select>
+                  </label>
+                  <label id="journalViewDateField" class="date-picker">
                     <span>查看日期</span>
-                    <input id="journalViewDate" type="date" />
+                    <div class="date-stepper">
+                      <input id="journalViewDate" type="date" />
+                      <div class="date-stepper-buttons" aria-hidden="false">
+                        <button class="date-step-button date-step-up" type="button" data-date-step-for="journalViewDate" data-date-step="-1" aria-label="前一天"></button>
+                        <button class="date-step-button date-step-down" type="button" data-date-step-for="journalViewDate" data-date-step="1" aria-label="后一天"></button>
+                      </div>
+                    </div>
                   </label>
                   <button id="openJournalDateButton" class="secondary-button" type="button">查看记录</button>
                 </div>
@@ -190,7 +234,13 @@
               <p class="muted">可以删除某一天的全部安排和记录，也可以清空软件的全部本地数据。删除前都会二次确认。</p>
               <label class="field compact-field">
                 <span>删除日期</span>
-                <input id="deleteDayDate" type="date" />
+                <div class="date-stepper">
+                  <input id="deleteDayDate" type="date" />
+                  <div class="date-stepper-buttons" aria-hidden="false">
+                    <button class="date-step-button date-step-up" type="button" data-date-step-for="deleteDayDate" data-date-step="-1" aria-label="前一天"></button>
+                    <button class="date-step-button date-step-down" type="button" data-date-step-for="deleteDayDate" data-date-step="1" aria-label="后一天"></button>
+                  </div>
+                </div>
               </label>
               <div class="delete-actions">
                 <button id="openDeleteDayButton" class="danger-button" type="button">删除当天数据</button>
@@ -263,35 +313,6 @@
       </div>
     </div>
 
-    <div id="importDateModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="importDateTitle">
-      <div class="modal-card small-modal">
-        <div class="modal-header">
-          <div>
-            <p class="eyebrow">导入日期</p>
-            <h2 id="importDateTitle">选择计划生效日期</h2>
-          </div>
-          <button id="closeImportDateModalButton" class="icon-button" aria-label="关闭">×</button>
-        </div>
-
-        <p id="importDateDescription" class="muted">这个文件没有多个明确日期，请选择计划开始和结束日期。</p>
-        <div class="form-row">
-          <label class="field">
-            <span>开始日期</span>
-            <input id="importStartDate" type="date" />
-          </label>
-          <label class="field">
-            <span>结束日期</span>
-            <input id="importEndDate" type="date" />
-          </label>
-        </div>
-
-        <div class="modal-actions">
-          <button id="cancelImportDateButton" class="secondary-button" type="button">取消</button>
-          <button id="confirmImportDateButton" class="primary-button" type="button">确认导入</button>
-        </div>
-      </div>
-    </div>
-
     <div id="importChoiceModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="importChoiceTitle">
       <div class="modal-card wide-modal">
         <div class="modal-header">
@@ -314,11 +335,10 @@
 
           <section class="import-choice-card">
             <h3>每日安排</h3>
-            <p class="muted">适合某一天或一段日期内的工作、学习、生活规划，仅支持表格文件。</p>
+            <p class="muted">适合某一天或一段日期内的工作、学习、生活规划。</p>
             <div class="import-choice-actions">
               <button id="reusePreviousButton" class="secondary-button" type="button">复用前一天</button>
-              <button id="manualDailyPlanButton" class="primary-button" type="button">手动添加安排</button>
-              <button id="fileDailyPlanButton" class="secondary-button" type="button">导入安排文件</button>
+              <button id="manualDailyPlanButton" class="primary-button" type="button">填写安排内容</button>
             </div>
           </section>
         </div>
@@ -381,13 +401,29 @@
             <p class="eyebrow">手动安排</p>
             <h2 id="dailyPlanTableTitle">填写每日安排</h2>
           </div>
+          <label class="single-day-toggle">
+            <input id="dailyPlanSingleDay" type="checkbox" checked />
+            <span>单日</span>
+          </label>
           <button id="closeDailyPlanTableModalButton" class="icon-button" aria-label="关闭">×</button>
         </div>
 
-        <label class="field compact-field">
-          <span>日期</span>
-          <input id="dailyPlanDate" type="date" />
-        </label>
+        <div id="dailyPlanSingleDateRow" class="term-range daily-date-range">
+          <label class="field">
+            <span>日期</span>
+            <input id="dailyPlanDate" type="date" />
+          </label>
+        </div>
+        <div id="dailyPlanRangeRow" class="term-range daily-date-range hidden">
+          <label class="field">
+            <span>开始日期</span>
+            <input id="dailyPlanStartDate" type="date" />
+          </label>
+          <label class="field">
+            <span>结束日期</span>
+            <input id="dailyPlanEndDate" type="date" />
+          </label>
+        </div>
 
         <div class="editable-table-wrap">
           <table class="editable-table daily-table">
@@ -406,7 +442,7 @@
 
         <div class="modal-actions">
           <button id="cancelDailyPlanTableButton" class="secondary-button" type="button">取消</button>
-          <button id="saveDailyPlanTableButton" class="primary-button" type="button">生成当日安排</button>
+          <button id="saveDailyPlanTableButton" class="primary-button" type="button">确定安排</button>
         </div>
       </div>
     </div>

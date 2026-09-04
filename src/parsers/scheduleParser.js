@@ -192,7 +192,7 @@ function rowToTask(row, mappings, index, context = {}) {
   if (!startTime && detectedTimeRange) startTime = detectedTimeRange.startTime;
   if (!endTime && detectedTimeRange) endTime = detectedTimeRange.endTime;
 
-  if (!startTime || !endTime) return null;
+  if (!startTime || !endTime) return rowToUntimedTask(row, mappings, index, context, rawText);
 
   const titleSource = getCell(row, mappings.title)
     || (timeRangeCell ? extractTitle(timeRangeCell, startTime, endTime) : '')
@@ -215,10 +215,35 @@ function rowToTask(row, mappings, index, context = {}) {
     type: getCell(row, mappings.type) || guessType(title),
     planDetails: getCell(row, mappings.planDetails),
     details: '',
-    status: '未评价',
+    status: normalizeTaskStatus(getCell(row, mappings.status)),
     rawText,
     sheetName: context.sheetName || '',
     rowIndex: context.rowIndex
+  };
+}
+
+function rowToUntimedTask(row, mappings, index, context = {}, rawText = '') {
+  if (mappings.title === undefined || !context.date) return null;
+
+  const title = cleanTaskTitle(getCell(row, mappings.title), '', '');
+  if (!isTaskLikeTitle(title)) return null;
+
+  return {
+    id: `${context.idPrefix || 'table'}-untimed-${Date.now()}-${index}`,
+    title,
+    startTime: '',
+    endTime: '',
+    date: context.date,
+    weekday: weekdayFromDate(context.date),
+    location: getCell(row, mappings.location),
+    type: getCell(row, mappings.type) || guessType(title),
+    planDetails: getCell(row, mappings.planDetails),
+    details: '',
+    status: normalizeTaskStatus(getCell(row, mappings.status)),
+    rawText,
+    sheetName: context.sheetName || '',
+    rowIndex: context.rowIndex,
+    source: 'untimed-table'
   };
 }
 
@@ -249,8 +274,8 @@ function collapseTasksByTime(taskItems) {
     const key = [
       normalizeParsedDate(task.date),
       task.sheetName || '',
-      task.startTime,
-      task.endTime
+      task.startTime || `untimed-${task.title}`,
+      task.endTime || task.location || task.rowIndex || ''
     ].join('|');
     const current = taskMap.get(key);
     if (!current) {
@@ -480,9 +505,20 @@ function mapHeader(header) {
     if (/星期|周|week|day/.test(label)) acc.weekday = index;
     if (/地点|教室|位置|location|place|room/.test(label)) acc.location = index;
     if (/类型|type/.test(label)) acc.type = index;
+    if (/完成情况|完成状态|完成|状态|情况|status/.test(label)) acc.status = index;
+    if (/评价/.test(label) && acc.status === undefined) acc.status = index;
     if (/时间段|时间|time/.test(label) && acc.startTime === undefined) acc.timeRange = index;
     return acc;
   }, {});
+}
+
+function normalizeTaskStatus(value) {
+  const text = String(value || '').trim();
+  if (!text) return '未评价';
+  if (/未完成|没完成|未做|失败/.test(text)) return '未完成';
+  if (/部分|一半|进行中|未完全/.test(text)) return '部分完成';
+  if (/完成|做完|已做|正好|√|✓/.test(text)) return '已完成';
+  return '未评价';
 }
 
 function getCell(row, index) {
