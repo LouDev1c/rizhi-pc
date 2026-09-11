@@ -24,62 +24,11 @@ async function parseScheduleFile(filePath) {
     return parseExcelWorkbook(filePath);
   }
 
-  if (ext === '.pdf') {
-    return parsePdfFile(filePath);
-  }
-
   return {
     tasks: [],
     status: 'unsupported',
-    message: '暂不支持该表格类型，请选择 xlsx、xls、csv、tsv 或 pdf 文件。'
+    message: '暂不支持该表格类型，请选择 xlsx、xls、csv 或 tsv 文件。'
   };
-}
-
-async function parsePdfFile(filePath) {
-  let PDFParse;
-  try {
-    ({ PDFParse } = require('pdf-parse'));
-  } catch (error) {
-    return {
-      tasks: [],
-      status: 'missing_dependency',
-      message: '解析 PDF 需要安装 pdf-parse 依赖：npm install'
-    };
-  }
-
-  let parser = null;
-  try {
-    const data = await fs.readFile(filePath);
-    parser = new PDFParse({ data });
-    const [textResult, tableResult] = await Promise.all([
-      parser.getText(),
-      parser.getTable().catch(() => null)
-    ]);
-    const text = textResult.text || '';
-    const rows = [
-      ...extractRowsFromPdfTables(tableResult),
-      ...parsePdfTextToRows(text)
-    ];
-    const parsed = buildResult(rows, {
-      idPrefix: 'pdf',
-      fileYear: inferYearFromFileName(filePath) || new Date().getFullYear()
-    });
-
-    return {
-      ...parsed,
-      timetableTemplate: { rows: [] },
-      pageCount: textResult.total || 0,
-      message: `PDF 表格转化完成：已解析出 ${parsed.tasks.length} 条安排`
-    };
-  } catch (error) {
-    return {
-      tasks: [],
-      status: 'parse_error',
-      message: `PDF 解析失败：${error.message}`
-    };
-  } finally {
-    if (parser) await parser.destroy();
-  }
 }
 
 async function parseExcelWorkbook(filePath) {
@@ -534,46 +483,6 @@ function parseDelimitedText(text, delimiter) {
     .map((line) => parseDelimitedLine(line, delimiter));
 }
 
-function parsePdfTextToRows(text) {
-  return String(text || '')
-    .replace(/\r/g, '\n')
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map(parsePdfTextLine);
-}
-
-function parsePdfTextLine(line) {
-  if (line.includes('\t')) return parseDelimitedLine(line, '\t');
-
-  const weekdayHeaders = extractWeekdayHeaders(line);
-  if (weekdayHeaders.length >= 2) {
-    const hasTimeColumn = /时间|节次|课节|节/.test(line.slice(0, line.indexOf(weekdayHeaders[0])));
-    return hasTimeColumn ? ['时间', ...weekdayHeaders] : weekdayHeaders;
-  }
-
-  const withCellBreaks = line.replace(/\s{2,}/g, '\t');
-  if (withCellBreaks.includes('\t')) return parseDelimitedLine(withCellBreaks, '\t');
-
-  return [line];
-}
-
-function extractRowsFromPdfTables(tableResult) {
-  if (!tableResult || !Array.isArray(tableResult.pages)) return [];
-
-  return tableResult.pages.flatMap((page) => {
-    if (!page || !Array.isArray(page.tables)) return [];
-    return page.tables.flatMap((table) => Array.isArray(table) ? table : []);
-  }).map((row) => Array.isArray(row) ? row.map((cell) => String(cell ?? '').trim()) : [])
-    .filter((row) => row.some(Boolean));
-}
-
-function extractWeekdayHeaders(text) {
-  return String(text || '').match(/(?:星期|周)\s*[一二三四五六日天]/g)
-    ?.map((value) => value.replace(/\s+/g, ''))
-    || [];
-}
-
 function parseDelimitedLine(line, delimiter) {
   const cells = [];
   let current = '';
@@ -736,7 +645,6 @@ function dedupeTimetableRows(rows) {
 module.exports = {
   parseScheduleFile,
   parseDelimitedText,
-  parsePdfTextToRows,
   extractTimetableTemplate,
   extractTimeRange,
   inferSheetDate,

@@ -169,30 +169,18 @@ async function saveData(app, data) {
   };
 }
 
-async function setDataPath(app, dataPathOrDirectory, currentData) {
-  const dataDirectory = path.extname(dataPathOrDirectory).toLowerCase() === '.json'
-    ? path.dirname(dataPathOrDirectory)
-    : dataPathOrDirectory;
+async function setStorageDirectory(app, dataDirectory, currentData) {
+  const settingsFilePath = path.join(dataDirectory, SETTINGS_FILE_NAME);
   const settings = await readSettings(app);
-  await writeSettings(app, {
+  const locationPath = getSettingsLocationPath(app);
+  const nextSettings = {
     ...settings,
     dataDirectory,
-    dataFilePath: undefined
-  });
-  await saveData(app, currentData || createDefaultData());
-  return loadData(app);
-}
-
-async function setSettingsPath(app, settingsFilePath, currentData) {
-  const currentSettings = await readSettings(app);
-  const nextSettings = {
-    ...currentSettings,
-    settingsFilePath,
-    dataDirectory: currentSettings.dataDirectory || (await getDataDirectory(app))
+    dataFilePath: undefined,
+    settingsFilePath
   };
-  const locationPath = getSettingsLocationPath(app);
 
-  await fs.mkdir(path.dirname(settingsFilePath), { recursive: true });
+  await fs.mkdir(dataDirectory, { recursive: true });
   await fs.writeFile(settingsFilePath, JSON.stringify(nextSettings, null, 2), 'utf8');
   await fs.mkdir(path.dirname(locationPath), { recursive: true });
   await fs.writeFile(locationPath, JSON.stringify({ settingsFilePath }, null, 2), 'utf8');
@@ -562,19 +550,29 @@ function normalizeJournalForStorage(journal) {
   const dateRangeStart = normalizeDate(journal && journal.dateRangeStart);
   const dateRangeEnd = normalizeDate(journal && journal.dateRangeEnd);
   const date = dateRangeStart || normalizeDate(journal && journal.date);
+  const { rating, ...journalWithoutRating } = journal || {};
 
   return {
-    ...journal,
+    ...journalWithoutRating,
     date,
     dateRangeStart,
     dateRangeEnd,
-    rating: normalizeJournalRating(journal && journal.rating)
+    tagId: normalizeJournalTagId(journal && (journal.tagId || legacyRatingToTagId(rating)))
   };
 }
 
-function normalizeJournalRating(value) {
-  const rating = String(value || '').trim() || '无';
-  return ['无', '一星', '二星', '三星', '四星', '五星'].includes(rating) ? rating : '无';
+function normalizeJournalTagId(value) {
+  return String(value || '').trim();
+}
+
+function legacyRatingToTagId(value) {
+  return {
+    '一星': 'legacy-1',
+    '二星': 'legacy-2',
+    '三星': 'legacy-3',
+    '四星': 'legacy-4',
+    '五星': 'legacy-5'
+  }[String(value || '').trim()] || '';
 }
 
 function collectDateMonths(startDate, endDate = '') {
@@ -630,6 +628,5 @@ module.exports = {
   loadData,
   resetData,
   saveData,
-  setDataPath,
-  setSettingsPath
+  setStorageDirectory
 };

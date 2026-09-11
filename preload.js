@@ -11,7 +11,7 @@ contextBridge.exposeInMainWorld('whbr', {
   saveData: (data) => ipcRenderer.invoke('data:save', data),
   getStoragePaths: () => ipcRenderer.invoke('data:getPaths'),
   chooseDataPath: (data) => ipcRenderer.invoke('data:choosePath', data),
-  chooseSettingsPath: (data) => ipcRenderer.invoke('data:chooseSettingsPath', data),
+  openDataPath: () => ipcRenderer.invoke('data:openDirectory'),
   resetData: () => ipcRenderer.invoke('data:reset'),
   showReminder: (payload) => ipcRenderer.invoke('notify:show', payload),
   getPathForFile: (file) => {

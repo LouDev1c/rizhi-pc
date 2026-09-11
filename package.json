@@ -1,6 +1,6 @@
 {
   "name": "rizhi",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "日织 - 工作、学习与生活平衡管理桌面客户端",
   "main": "main.js",
   "author": "",
@@ -11,7 +11,7 @@
   },
   "scripts": {
     "start": "electron .",
-    "check": "node --check main.js && node --check preload.js && node --check src/renderer.js && node --check src/parsers/scheduleParser.js && node --check src/parsers/textScheduleParser.js && node --check src/parsers/imageScheduleParser.js && node --check src/parsers/tesseractNodeWorker.js && node --check src/storage/localDataStore.js",
+    "check": "node --check main.js && node --check preload.js && node --check src/renderer.js && node --check src/parsers/scheduleParser.js && node --check src/parsers/textScheduleParser.js && node --check src/storage/localDataStore.js",
     "pack": "electron-builder --dir",
     "dist": "electron-builder --win nsis",
     "release": "electron-builder --win nsis --publish always"
@@ -41,14 +41,6 @@
         "from": "rizhi.ico",
         "to": "rizhi.ico"
       }
-    ],
-    "asarUnpack": [
-      "node_modules/sharp/**/*",
-      "node_modules/@img/**/*",
-      "node_modules/@napi-rs/canvas/**/*",
-      "node_modules/@napi-rs/canvas-win32-x64-msvc/**/*",
-      "node_modules/tesseract.js/**/*",
-      "node_modules/tesseract.js-core/**/*"
     ],
     "win": {
       "target": [
@@ -80,12 +72,7 @@
     "electron-builder": "^26.15.3"
   },
   "dependencies": {
-    "@tesseract.js-data/chi_sim": "^1.0.0",
-    "@tesseract.js-data/eng": "^1.0.0",
     "electron-updater": "^6.8.9",
-    "pdf-parse": "^2.4.5",
-    "sharp": "^0.35.4",
-    "tesseract.js": "^5.1.1",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   }
 }

@@ -1,4 +1,21 @@
 !macro customUnInstall
+  Push $R0
+  Push $R1
+
+  ${If} ${Silent}
+    Goto keepMemory
+  ${EndIf}
+
+  ${GetParameters} $R0
+  ${GetOptions} $R0 "/KEEP_APP_DATA" $R1
+  ${IfNot} ${Errors}
+    Goto keepMemory
+  ${EndIf}
+  ${GetOptions} $R0 "--updated" $R1
+  ${IfNot} ${Errors}
+    Goto keepMemory
+  ${EndIf}
+
   MessageBox MB_YESNO|MB_ICONQUESTION "是否删除日织的本地记录文件？$\r$\n$\r$\n选择“是”会删除 AppData\Roaming 下的日织 memory 文件夹。$\r$\n选择“否”会保留 memory 文件夹和其中的文件。" IDYES deleteMemory IDNO keepMemory
 
   deleteMemory:
@@ -6,4 +23,6 @@
     RMDir /r "$APPDATA\rizhi\memory"
 
   keepMemory:
+    Pop $R1
+    Pop $R0
 !macroend

@@ -1,10 +1,10 @@
-const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeImage, screen } = require('electron');
+const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeImage, screen, shell } = require('electron');
 const path = require('path');
 const { pathToFileURL } = require('url');
 const fsSync = require('fs');
 const fs = require('fs/promises');
 const { parseScheduleFile } = require('./src/parsers/scheduleParser');
-const { getStoragePaths, loadData, resetData, saveData, setDataPath, setSettingsPath } = require('./src/storage/localDataStore');
+const { getStoragePaths, loadData, resetData, saveData, setStorageDirectory } = require('./src/storage/localDataStore');
 const { autoUpdater } = require('electron-updater');
 
 const scheduleFileExtensions = ['xlsx', 'xls', 'csv', 'tsv'];
@@ -432,7 +432,7 @@ ipcMain.handle('data:getPaths', async () => {
 
 ipcMain.handle('data:choosePath', async (_event, data) => {
   const result = await dialog.showOpenDialog({
-    title: '选择日织月度数据文件夹',
+    title: '选择日织本地记录保存文件夹',
     properties: ['openDirectory', 'createDirectory']
   });
 
@@ -442,28 +442,18 @@ ipcMain.handle('data:choosePath', async (_event, data) => {
 
   return {
     canceled: false,
-    ...(await setDataPath(app, result.filePaths[0], data))
+    ...(await setStorageDirectory(app, result.filePaths[0], data))
   };
 });
 
-ipcMain.handle('data:chooseSettingsPath', async (_event, data) => {
-  const result = await dialog.showSaveDialog({
-    title: '选择日织设置文件保存位置',
-    defaultPath: 'rizhi-settings.json',
-    filters: [
-      { name: '日织设置文件', extensions: ['json'] },
-      { name: 'JSON', extensions: ['json'] }
-    ]
-  });
+ipcMain.handle('data:openDirectory', async () => {
+  const paths = await getStoragePaths(app);
+  const directoryPath = paths.dataDirectory || path.dirname(paths.dataFilePath || '');
+  if (!directoryPath) return { ok: false, error: '没有可打开的数据文件夹。' };
 
-  if (result.canceled || !result.filePath) {
-    return { canceled: true };
-  }
-
-  return {
-    canceled: false,
-    ...(await setSettingsPath(app, result.filePath, data))
-  };
+  await fs.mkdir(directoryPath, { recursive: true });
+  const error = await shell.openPath(directoryPath);
+  return { ok: !error, error };
 });
 
 ipcMain.handle('data:reset', async () => {

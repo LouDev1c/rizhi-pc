@@ -10,10 +10,27 @@ const pages = {
   settings: document.querySelector('#settingsPage')
 };
 const TASK_TYPES = ['工作', '课程', '学习', '生活'];
-const JOURNAL_RATINGS = ['无', '一星', '二星', '三星', '四星', '五星'];
+const TASK_SUMMARY_TYPES = [...TASK_TYPES, '未分配'];
+const DEFAULT_JOURNAL_TAGS = [
+  { id: 'legacy-1', color: '#9ca3af', shortName: '低', fullName: '状态较低，需要复盘和调整的日子' },
+  { id: 'legacy-2', color: '#60a5fa', shortName: '缓', fullName: '节奏偏缓但仍有推进的日子' },
+  { id: 'legacy-3', color: '#34d399', shortName: '稳', fullName: '整体平稳、按计划进行的日子' },
+  { id: 'legacy-4', color: '#f59e0b', shortName: '好', fullName: '状态较好、完成度较高的日子' },
+  { id: 'legacy-5', color: '#ef4444', shortName: '亮', fullName: '高光日、值得特别标记的日子' }
+];
+const LEGACY_RATING_TO_TAG_ID = {
+  '一星': 'legacy-1',
+  '二星': 'legacy-2',
+  '三星': 'legacy-3',
+  '四星': 'legacy-4',
+  '五星': 'legacy-5'
+};
+const MIN_DATE_YEAR = 1949;
+const MIN_DATE_VALUE = '1949-01-01';
 const emptyState = document.querySelector('#emptyState');
 const taskWorkspace = document.querySelector('#taskWorkspace');
 const taskList = document.querySelector('#taskList');
+const taskDurationSummary = document.querySelector('#taskDurationSummary');
 const statusBox = document.querySelector('#statusBox');
 const manualTaskButton = document.querySelector('#manualTaskButton');
 const importFileButton = document.querySelector('#importFileButton');
@@ -22,21 +39,26 @@ const reusePreviousButton = document.querySelector('#reusePreviousButton');
 const importMoreButton = document.querySelector('#importMoreButton');
 const taskDateFilter = document.querySelector('#taskDateFilter');
 const journalDate = document.querySelector('#journalDate');
-const journalRating = document.querySelector('#journalRating');
+const journalTag = document.querySelector('#journalTag');
+const journalTagPaletteButton = document.querySelector('#journalTagPaletteButton');
+const journalTagPalette = document.querySelector('#journalTagPalette');
 const journalContent = document.querySelector('#journalContent');
 const saveJournalButton = document.querySelector('#saveJournalButton');
 const journalSaveState = document.querySelector('#journalSaveState');
-const journalRatingFilterEnabled = document.querySelector('#journalRatingFilterEnabled');
-const journalRatingFilter = document.querySelector('#journalRatingFilter');
-const journalRatingFilterField = document.querySelector('#journalRatingFilterField');
+const journalFilterModeButton = document.querySelector('#journalFilterModeButton');
+const journalTagFilter = document.querySelector('#journalTagFilter');
+const journalTagFilterPaletteButton = document.querySelector('#journalTagFilterPaletteButton');
+const journalTagFilterPalette = document.querySelector('#journalTagFilterPalette');
+const journalTagFilterField = document.querySelector('#journalTagFilterField');
 const journalViewDateField = document.querySelector('#journalViewDateField');
 const journalViewDate = document.querySelector('#journalViewDate');
-const openJournalDateButton = document.querySelector('#openJournalDateButton');
 const journalList = document.querySelector('#journalList');
 const dataFilePath = document.querySelector('#dataFilePath');
 const settingsFilePath = document.querySelector('#settingsFilePath');
 const chooseDataPathButton = document.querySelector('#chooseDataPathButton');
-const chooseSettingsPathButton = document.querySelector('#chooseSettingsPathButton');
+const openDataPathButton = document.querySelector('#openDataPathButton');
+const journalTagSettingsList = document.querySelector('#journalTagSettingsList');
+const addJournalTagButton = document.querySelector('#addJournalTagButton');
 const deleteDayDate = document.querySelector('#deleteDayDate');
 const openDeleteDayButton = document.querySelector('#openDeleteDayButton');
 const openResetButton = document.querySelector('#openResetButton');
@@ -56,6 +78,12 @@ const closeTaskEditModalButton = document.querySelector('#closeTaskEditModalButt
 const cancelTaskEditButton = document.querySelector('#cancelTaskEditButton');
 const taskDetails = document.querySelector('#taskDetails');
 const taskStatus = document.querySelector('#taskStatus');
+const profileStatsStartDate = document.querySelector('#profileStatsStartDate');
+const profileStatsPeriod = document.querySelector('#profileStatsPeriod');
+const profileStatsSummary = document.querySelector('#profileStatsSummary');
+const profileStatsRangeText = document.querySelector('#profileStatsRangeText');
+const profileStatsPie = document.querySelector('#profileStatsPie');
+const profileStatsBars = document.querySelector('#profileStatsBars');
 const importChoiceModal = document.querySelector('#importChoiceModal');
 const closeImportChoiceModalButton = document.querySelector('#closeImportChoiceModalButton');
 const manualScheduleButton = document.querySelector('#manualScheduleButton');
@@ -126,9 +154,13 @@ let lastReminderCheckValue = null;
 let statusTimer = null;
 let tutorialStepIndex = 0;
 let previousTutorialPage = 'tasks';
-let appliedJournalRatingFilter = '无';
+let appliedJournalTagFilter = '';
+let journalFilterMode = 'all';
+let committedProfileStatsStartDate = '';
 const firedReminderKeys = new Set();
 const activePlanningDates = new Set();
+const dateInputControllers = new WeakMap();
+const MISSED_REMINDER_BACKLOG_LIMIT_MINUTES = 2;
 const tutorialSteps = [
   {
     page: 'tasks',
@@ -144,27 +176,40 @@ const tutorialSteps = [
   },
   {
     page: 'records',
-    targetSelector: '.records-list-panel .section-head',
+    targetSelector: '#journalFilterModeButton',
     title: '记录列表',
-    text: '记录列表可以按日期查看历史记录，像翻看日记一样回顾之前写下的内容。'
+    text: '这个按钮有三档：显示全部、日期记录、标签记录。显示全部会列出所有记录，日期记录会按选定日期筛选，标签记录会按色块标签筛选；点击记录条即可查看当天详情。'
   },
   {
     page: 'profile',
-    targetSelector: '.profile-grid .panel',
-    title: '个人设置',
-    text: '这里可以设置课程、工作和学习的时间周期，日织会按这些信息提醒你专注或休息。'
+    targetSelector: '.profile-dashboard .panel',
+    scrollBlock: 'start',
+    title: '自律统计',
+    text: '这里可以按本日、本周、本月、本季度和本年查看任务安排、完成评价和各类投入时间。'
   },
   {
     page: 'settings',
-    targetSelector: '.settings-data-panel .path-list',
+    targetSelector: '.settings-data-panel',
     title: '数据文件',
-    text: '个人记录与软件设置会存放在这里显示的位置，也可以按你的习惯自定义保存地址。'
+    text: '个人记录与软件设置会存放在这里显示的文件夹中。可以选择新的保存文件夹，也可以直接打开本地文件夹做备份或迁移。'
   },
   {
     page: 'settings',
+    targetSelector: '.settings-tags-panel',
+    title: '标签',
+    text: '标签用纯色块标记每日记录。可以新增、删除和调整颜色，并用简称与全称说明每种日子的含义。'
+  },
+  {
+    page: 'settings',
+    targetSelector: '.settings-reminder-panel',
+    title: '周期设置',
+    text: '课程、工作和学习的提醒周期在这里调整，日织会按这些信息提醒你专注、休息或活动身体。'
+  },
+  {
+    page: 'tasks',
     targetSelector: '#backToCurrentTaskButton',
     title: '定位按钮',
-    text: '点击这个按钮可以回到当前任务，并快速定位到此刻正在进行的安排。'
+    text: '左下角按钮可以回到任务页并定位到当前正在进行的安排，查看其他日期或滚动列表后也能一键回到现在。'
   },
   {
     page: 'tasks',
@@ -175,6 +220,10 @@ const tutorialSteps = [
 
 navItems.forEach((item) => {
   item.addEventListener('click', () => {
+    if (item.dataset.page === 'tasks') {
+      goToCurrentTask();
+      return;
+    }
     showPage(item.dataset.page);
   });
 });
@@ -197,6 +246,7 @@ tutorialConfirmModal.addEventListener('click', (event) => {
 window.addEventListener('resize', () => {
   if (!tutorialOverlay.classList.contains('hidden')) positionTutorialOverlay();
 });
+document.addEventListener('click', closeTagPalettesOnOutsideClick);
 
 backToCurrentTaskButton.addEventListener('click', goToCurrentTask);
 if (manualTaskButton) manualTaskButton.addEventListener('click', openImportChoiceModal);
@@ -204,6 +254,12 @@ reusePreviousButton.addEventListener('click', reusePreviousDay);
 if (importFileButton) importFileButton.addEventListener('click', openImportChoiceModal);
 importMoreButton.addEventListener('click', openImportChoiceModal);
 window.addEventListener('keydown', (event) => {
+  if (isSaveShortcut(event) && canSaveJournalWithShortcut()) {
+    event.preventDefault();
+    saveSelectedJournal();
+    return;
+  }
+
   if (event.key === 'Escape' && !resetModal.classList.contains('hidden')) {
     closeResetModal();
   }
@@ -226,6 +282,24 @@ window.addEventListener('keydown', (event) => {
     closeTutorialConfirmModal();
   }
 });
+
+function isSaveShortcut(event) {
+  return !event.repeat && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's';
+}
+
+function canSaveJournalWithShortcut() {
+  if (!pages.records.classList.contains('active')) return false;
+  return [
+    resetModal,
+    taskEditModal,
+    importChoiceModal,
+    scheduleTableModal,
+    dailyPlanTableModal,
+    journalViewModal,
+    tutorialConfirmModal
+  ].every((modal) => modal.classList.contains('hidden'));
+}
+
 if (importFileButton) {
   importFileButton.addEventListener('dragover', handleDragOver);
   importFileButton.addEventListener('dragleave', handleDragLeave);
@@ -234,28 +308,43 @@ if (importFileButton) {
 importMoreButton.addEventListener('dragover', handleDragOver);
 importMoreButton.addEventListener('dragleave', handleDragLeave);
 importMoreButton.addEventListener('drop', handleDrop);
-taskDateFilter.addEventListener('change', renderTasks);
-journalDate.addEventListener('change', renderSelectedJournal);
-if (journalRatingFilterEnabled) journalRatingFilterEnabled.addEventListener('change', updateJournalFilterControls);
+registerDateInput(taskDateFilter, { onCommit: renderTasks });
+registerDateInput(profileStatsStartDate, {
+  onCommit: (date) => {
+    committedProfileStatsStartDate = date;
+    renderProfileStats();
+  }
+});
+if (profileStatsPeriod) profileStatsPeriod.addEventListener('change', renderProfileStats);
+registerDateInput(journalDate, { onCommit: renderSelectedJournal });
+if (journalTag) journalTag.addEventListener('change', () => renderTagPicker(journalTag, journalTagPaletteButton, journalTagPalette));
+if (journalTagFilter) {
+  journalTagFilter.addEventListener('change', () => {
+    renderTagPicker(journalTagFilter, journalTagFilterPaletteButton, journalTagFilterPalette);
+    if (journalFilterMode === 'tag') {
+      appliedJournalTagFilter = normalizeJournalTagId(journalTagFilter.value);
+      renderJournalList();
+    }
+  });
+}
+if (journalTagPaletteButton) journalTagPaletteButton.addEventListener('click', () => toggleTagPalette(journalTagPalette));
+if (journalTagFilterPaletteButton) journalTagFilterPaletteButton.addEventListener('click', () => toggleTagPalette(journalTagFilterPalette));
+if (journalFilterModeButton) journalFilterModeButton.addEventListener('click', cycleJournalFilterMode);
 saveJournalButton.addEventListener('click', saveSelectedJournal);
-journalViewDate.addEventListener('blur', commitJournalViewDate);
-journalViewDate.addEventListener('keydown', (event) => {
-  if (event.key === 'Enter') {
-    event.preventDefault();
-    journalViewDate.blur();
+registerDateInput(journalViewDate, {
+  onCommit: () => {
+    if (journalFilterMode === 'date') renderJournalList();
   }
 });
-openJournalDateButton.addEventListener('click', () => {
-  commitJournalViewDate();
-  if (journalRatingFilterEnabled && journalRatingFilterEnabled.checked) {
-    appliedJournalRatingFilter = normalizeJournalRating(journalRatingFilter ? journalRatingFilter.value : '无');
-    renderJournalList();
-    return;
-  }
-  if (journalViewDate.value) openJournalForDate(journalViewDate.value);
-});
+registerDateInput(deleteDayDate);
+registerDateInput(termStartDate);
+registerDateInput(termEndDate);
+registerDateInput(dailyPlanDate);
+registerDateInput(dailyPlanStartDate, { onCommit: constrainDailyPlanEndDate });
+registerDateInput(dailyPlanEndDate);
 chooseDataPathButton.addEventListener('click', chooseDataPath);
-chooseSettingsPathButton.addEventListener('click', chooseSettingsPath);
+if (openDataPathButton) openDataPathButton.addEventListener('click', openDataPath);
+if (addJournalTagButton) addJournalTagButton.addEventListener('click', addJournalTag);
 openDeleteDayButton.addEventListener('click', openDeleteDayModal);
 openResetButton.addEventListener('click', openResetModal);
 closeResetModalButton.addEventListener('click', closeResetModal);
@@ -311,7 +400,8 @@ async function refreshSystemTime() {
   currentEffectiveNow = now;
   const weekday = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][now.getDay()];
   systemTime.textContent = `${formatClockDate(now)} ${weekday} ${formatClockTime(now)}`;
-  updateTaskTemporalView({ scrollToCurrent: true });
+  updateTaskTemporalView();
+  if (pages.profile.classList.contains('active')) renderProfileStats();
   checkDueReminders(now);
 }
 
@@ -375,13 +465,13 @@ async function showNextTutorialStep() {
 function finishTutorial() {
   tutorialOverlay.classList.add('hidden');
   showPage('tasks');
-  renderTasks();
+  renderTasks({ scrollToCurrent: true, forceScroll: true });
 }
 
 function scrollTutorialTargetIntoView(step) {
   const target = getTutorialTarget(step);
   if (!target) return;
-  target.scrollIntoView({ block: 'center', inline: 'center' });
+  target.scrollIntoView({ block: step.scrollBlock || 'center', inline: 'center' });
 }
 
 function positionTutorialOverlay() {
@@ -445,14 +535,118 @@ function handleDateStepButton(event) {
   const offsetDays = Number(button.dataset.dateStep);
   if (!input || !Number.isFinite(offsetDays)) return;
 
-  const currentDate = normalizeDate(input.value) || formatLocalDate(currentEffectiveNow || new Date());
+  const currentDate = committedDateInputValue(input) || formatLocalDate(currentEffectiveNow || new Date());
   const nextDate = shiftDate(currentDate, offsetDays);
-  if (!nextDate) return;
+  if (!nextDate || !isSelectableDate(nextDate)) return;
 
-  input.value = nextDate;
+  setDateInputValue(input, nextDate, { trigger: true });
   input.blur();
   button.blur();
-  input.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+function registerDateInput(input, options = {}) {
+  if (!input) return;
+
+  input.min = MIN_DATE_VALUE;
+  input.max = '9999-12-31';
+  input.dataset.dateInput = 'managed';
+
+  const controller = {
+    committed: isSelectableDate(input.value) ? normalizeDate(input.value) : '',
+    onCommit: typeof options.onCommit === 'function' ? options.onCommit : null
+  };
+  dateInputControllers.set(input, controller);
+
+  input.addEventListener('input', () => sanitizeDateInputValue(input));
+  input.addEventListener('change', () => {
+    if (document.activeElement === input) {
+      sanitizeDateInputValue(input);
+      return;
+    }
+    commitDateInput(input);
+  });
+  input.addEventListener('blur', () => commitDateInput(input));
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      input.blur();
+    }
+  });
+}
+
+function sanitizeDateInputValue(input) {
+  const sanitized = sanitizeDateSegmentLengths(input.value);
+  if (sanitized !== input.value) {
+    input.value = sanitized;
+  }
+}
+
+function commitDateInput(input) {
+  if (!input) return false;
+
+  sanitizeDateInputValue(input);
+  const controller = dateInputControllers.get(input);
+  const normalizedDate = normalizeDate(input.value);
+
+  if (!isSelectableDate(normalizedDate)) {
+    input.value = fallbackDateInputValue(input);
+    return false;
+  }
+
+  input.value = normalizedDate;
+  const previousDate = controller ? controller.committed : '';
+  if (controller) controller.committed = normalizedDate;
+  if (controller && controller.onCommit && previousDate !== normalizedDate) {
+    controller.onCommit(normalizedDate);
+  }
+  return true;
+}
+
+function setDateInputValue(input, date, options = {}) {
+  if (!input) return false;
+  const normalizedDate = normalizeDate(date);
+  if (!isSelectableDate(normalizedDate)) return false;
+
+  input.value = normalizedDate;
+  const controller = dateInputControllers.get(input);
+  const previousDate = controller ? controller.committed : '';
+  if (controller) {
+    controller.committed = normalizedDate;
+    if (options.trigger && controller.onCommit && previousDate !== normalizedDate) {
+      controller.onCommit(normalizedDate);
+    }
+  }
+  return true;
+}
+
+function committedDateInputValue(input) {
+  const controller = dateInputControllers.get(input);
+  if (controller && isSelectableDate(controller.committed)) return controller.committed;
+  const normalizedDate = normalizeDate(input && input.value);
+  return isSelectableDate(normalizedDate) ? normalizedDate : '';
+}
+
+function fallbackDateInputValue(input) {
+  return committedDateInputValue(input) || formatLocalDate(currentEffectiveNow || new Date());
+}
+
+function sanitizeDateSegmentLengths(value) {
+  const text = clean(value);
+  if (!text) return '';
+  const parts = text.split(/[^\d]+/);
+
+  if (parts.length > 1) {
+    return [
+      (parts[0] || '').slice(0, 4),
+      (parts[1] || '').slice(0, 2),
+      (parts[2] || '').slice(0, 2)
+    ].filter((part) => part !== '').join('-');
+  }
+
+  const digits = text.replace(/\D/g, '').slice(0, 8);
+  if (digits.length <= 4) return digits;
+  if (digits.length <= 6) return `${digits.slice(0, 4)}-${digits.slice(4)}`;
+  return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`;
 }
 
 async function importScheduleFile() {
@@ -584,8 +778,8 @@ function openScheduleTableModal(prefillTemplate = null, importResult = null) {
       ? template.rows
       : null;
   const today = taskDateFilter.value || formatLocalDate(currentEffectiveNow);
-  termStartDate.value = template && template.termStartDate ? template.termStartDate : today;
-  termEndDate.value = template && template.termEndDate ? template.termEndDate : today;
+  setDateInputValue(termStartDate, template && template.termStartDate ? template.termStartDate : today);
+  setDateInputValue(termEndDate, template && template.termEndDate ? template.termEndDate : today);
   document.querySelector('#scheduleTableTitle').textContent = hasTemplate || prefillTemplate ? '查看/修改学期课表' : '填写学期课表';
   saveScheduleTableButton.textContent = hasTemplate ? '保存并更新课程安排' : '生成课程安排';
   scheduleTableBody.innerHTML = '';
@@ -755,6 +949,8 @@ function templateFromScheduleTasks(taskItems) {
 }
 
 async function saveScheduleTable() {
+  commitDateInput(termStartDate);
+  commitDateInput(termEndDate);
   const dates = enumerateDates(termStartDate.value, termEndDate.value);
   if (dates.length === 0) {
     setStatus('请填写有效的学期开始和结束日期。', '');
@@ -780,7 +976,7 @@ async function saveScheduleTable() {
     scheduleTemplate: template
   };
   tasks = mergeTasks(removeGeneratedScheduleTasks(tasks), newTasks);
-  taskDateFilter.value = dates[0];
+  setDateInputValue(taskDateFilter, dates[0]);
   activePlanningDates.add(dates[0]);
   await saveState();
   closeScheduleTableModal();
@@ -807,9 +1003,9 @@ function openDailyPlanTableModal() {
   closeImportChoiceModal();
   const defaultDate = taskDateFilter.value || formatLocalDate(currentEffectiveNow);
   dailyPlanSingleDay.checked = true;
-  dailyPlanDate.value = defaultDate;
-  dailyPlanStartDate.value = defaultDate;
-  dailyPlanEndDate.value = defaultDate;
+  setDateInputValue(dailyPlanDate, defaultDate);
+  setDateInputValue(dailyPlanStartDate, defaultDate);
+  setDateInputValue(dailyPlanEndDate, defaultDate);
   syncDailyPlanDateMode();
   dailyPlanTableBody.innerHTML = '';
   addDailyPlanRow('09:00-11:30');
@@ -836,10 +1032,16 @@ function addDailyPlanRow(timeRange = '') {
   titleInput.placeholder = '做什么事';
   titleCell.appendChild(titleInput);
 
+  const planCell = document.createElement('td');
+  const planInput = document.createElement('input');
+  planInput.type = 'text';
+  planInput.placeholder = '具体要做什么，可不填';
+  planCell.appendChild(planInput);
+
   const typeCell = document.createElement('td');
   typeCell.appendChild(createTypeSelect('工作'));
 
-  row.append(timeCell, titleCell, typeCell);
+  row.append(timeCell, titleCell, planCell, typeCell);
   dailyPlanTableBody.appendChild(row);
 }
 
@@ -849,13 +1051,13 @@ function syncDailyPlanDateMode() {
   dailyPlanRangeRow.classList.toggle('hidden', singleDay);
 
   if (singleDay) {
-    dailyPlanDate.value = dailyPlanDate.value || dailyPlanStartDate.value || taskDateFilter.value || formatLocalDate(currentEffectiveNow);
+    setDateInputValue(dailyPlanDate, dailyPlanDate.value || dailyPlanStartDate.value || taskDateFilter.value || formatLocalDate(currentEffectiveNow));
     return;
   }
 
   const fallbackDate = dailyPlanDate.value || taskDateFilter.value || formatLocalDate(currentEffectiveNow);
-  dailyPlanStartDate.value = dailyPlanStartDate.value || fallbackDate;
-  dailyPlanEndDate.value = dailyPlanEndDate.value || dailyPlanStartDate.value;
+  setDateInputValue(dailyPlanStartDate, dailyPlanStartDate.value || fallbackDate);
+  setDateInputValue(dailyPlanEndDate, dailyPlanEndDate.value || dailyPlanStartDate.value);
   constrainDailyPlanEndDate();
 }
 
@@ -864,7 +1066,7 @@ function constrainDailyPlanEndDate() {
   const startDate = normalizeDate(dailyPlanStartDate.value);
   dailyPlanEndDate.min = startDate || '';
   if (startDate && normalizeDate(dailyPlanEndDate.value) && normalizeDate(dailyPlanEndDate.value) < startDate) {
-    dailyPlanEndDate.value = startDate;
+    setDateInputValue(dailyPlanEndDate, startDate);
   }
 }
 
@@ -879,13 +1081,16 @@ async function saveDailyPlanTable() {
     .map((row, index) => {
       const timeInput = row.querySelector('td:nth-child(1) input');
       const titleInput = row.querySelector('td:nth-child(2) input');
+      const planInput = row.querySelector('td:nth-child(3) input');
       const typeSelect = row.querySelector('select');
       const timeRange = extractTimeRangeFromInput(timeInput.value);
       const title = clean(titleInput.value);
+      const planDetails = clean(planInput.value);
       if (!timeRange || !title) return null;
 
       return {
         title,
+        planDetails,
         timeRange,
         type: normalizeTaskType(typeSelect.value, title),
         index
@@ -911,7 +1116,7 @@ async function saveDailyPlanTable() {
         weekday: weekdayFromDate(date),
         location: '',
         type: planRow.type,
-        planDetails: '',
+        planDetails: planRow.planDetails,
         details: '',
         status: '未评价',
         rawText: '',
@@ -923,7 +1128,7 @@ async function saveDailyPlanTable() {
   });
 
   tasks = mergeTasks(tasks, newTasks);
-  taskDateFilter.value = dates[0];
+  setDateInputValue(taskDateFilter, dates[0]);
   dates.forEach((date) => activePlanningDates.add(date));
   await saveState();
   closeDailyPlanTableModal();
@@ -934,6 +1139,9 @@ async function saveDailyPlanTable() {
 }
 
 function selectedDailyPlanDates() {
+  commitDateInput(dailyPlanDate);
+  commitDateInput(dailyPlanStartDate);
+  commitDateInput(dailyPlanEndDate);
   if (dailyPlanSingleDay && dailyPlanSingleDay.checked) {
     const date = normalizeDate(dailyPlanDate.value);
     return date ? [date] : [];
@@ -961,11 +1169,12 @@ function handleDrop(event) {
   importDroppedFile(file);
 }
 
-function renderTasks() {
+function renderTasks(options = {}) {
   const selectedDate = clean(taskDateFilter.value);
   const visibleTasks = selectedDate
     ? tasks.filter((task) => isRenderableTask(task) && normalizeDate(task.date) === selectedDate)
     : tasks.filter(isRenderableTask);
+  renderTaskDurationSummary(visibleTasks);
   emptyState.classList.add('hidden');
   taskWorkspace.classList.remove('hidden');
   taskList.innerHTML = '';
@@ -1053,13 +1262,164 @@ function renderTasks() {
   });
 
   taskList.appendChild(createAddTaskRow());
-  updateTaskTemporalView({ scrollToCurrent: true, forceScroll: true });
+  updateTaskTemporalView({
+    scrollToCurrent: Boolean(options.scrollToCurrent),
+    forceScroll: Boolean(options.forceScroll)
+  });
+}
+
+function renderTaskDurationSummary(dayTasks) {
+  if (!taskDurationSummary) return;
+
+  const minutesByType = sumTaskMinutesByType(dayTasks);
+  const parts = TASK_SUMMARY_TYPES
+    .filter((type) => minutesByType[type] > 0)
+    .map((type) => `${type}：${formatDurationHours(minutesByType[type])}`);
+
+  taskDurationSummary.innerHTML = '';
+  parts.forEach((part) => {
+    const item = document.createElement('span');
+    item.textContent = part;
+    taskDurationSummary.appendChild(item);
+  });
+  taskDurationSummary.classList.toggle('hidden', parts.length === 0);
+}
+
+function renderProfileStats() {
+  if (!profileStatsSummary || !profileStatsBars || !profileStatsPie || !profileStatsStartDate || !profileStatsPeriod) return;
+
+  if (!committedProfileStatsStartDate) {
+    committedProfileStatsStartDate = formatLocalDate(currentEffectiveNow || new Date());
+  }
+  if (!profileStatsStartDate.value || document.activeElement !== profileStatsStartDate) {
+    setDateInputValue(profileStatsStartDate, committedProfileStatsStartDate);
+  }
+
+  const range = dateRangeForProfileStats(
+    profileStatsPeriod.value || 'week',
+    committedProfileStatsStartDate
+  );
+  const rangeDates = enumerateDates(range.start, range.end);
+  const rangeTasks = tasks.filter((task) => {
+    const date = normalizeDate(task.date);
+    return isRenderableTask(task) && date && date >= range.start && date <= range.end;
+  });
+  const scheduledDates = new Set(rangeTasks.map((task) => normalizeDate(task.date)).filter(Boolean));
+  const evaluatedTasks = rangeTasks.filter(hasTaskDetail);
+  const minutesByType = sumTaskMinutesByType(rangeTasks);
+  const totalMinutes = Object.values(minutesByType).reduce((sum, minutes) => sum + minutes, 0);
+  const averageDenominator = Math.max(scheduledDates.size, 1);
+
+  if (profileStatsRangeText) {
+    profileStatsRangeText.textContent = `${range.start} 至 ${range.end}`;
+  }
+
+  profileStatsSummary.innerHTML = '';
+  [
+    ['安排天数', `${scheduledDates.size} 天`, `范围内共 ${rangeDates.length} 天`],
+    ['安排任务', `${rangeTasks.length} 个`, '可显示在任务页的条目'],
+    ['已评价任务', `${evaluatedTasks.length} 个`, `${formatPercent(evaluatedTasks.length, rangeTasks.length)} 已评价`],
+    ['总安排时长', formatDurationHours(totalMinutes), `平均值按 ${scheduledDates.size || 0} 个有安排的日期计算`]
+  ].forEach(([label, value, helper]) => {
+    const card = document.createElement('div');
+    card.className = 'stat-card';
+    const title = document.createElement('span');
+    title.textContent = label;
+    const strong = document.createElement('strong');
+    strong.textContent = value;
+    const note = document.createElement('small');
+    note.textContent = helper;
+    card.append(title, strong, note);
+    profileStatsSummary.appendChild(card);
+  });
+
+  profileStatsBars.innerHTML = '';
+  profileStatsPie.innerHTML = '';
+  const averageByType = TASK_SUMMARY_TYPES
+    .map((type) => ({
+      type,
+      minutes: (minutesByType[type] || 0) / averageDenominator
+    }))
+    .filter((item) => item.minutes > 0);
+  const maxAverage = Math.max(...averageByType.map((item) => item.minutes), 1);
+
+  if (averageByType.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'stats-empty muted';
+    empty.textContent = '这个范围内还没有可统计的任务安排。';
+    profileStatsBars.appendChild(empty);
+    renderProfileStatsPie([]);
+    return;
+  }
+
+  renderProfileStatsPie(averageByType);
+
+  averageByType.forEach((item) => {
+    const row = document.createElement('div');
+    row.className = 'stats-bar-row';
+    const label = document.createElement('span');
+    label.className = 'stats-bar-label';
+    label.textContent = item.type;
+    const track = document.createElement('div');
+    track.className = 'stats-bar-track';
+    const fill = document.createElement('div');
+    fill.className = `stats-bar-fill type-${normalizeTaskTypeForClass(item.type)}`;
+    fill.style.width = `${Math.max(6, (item.minutes / maxAverage) * 100)}%`;
+    track.appendChild(fill);
+    const value = document.createElement('span');
+    value.className = 'stats-bar-value';
+    value.textContent = formatDurationHours(item.minutes);
+    row.append(label, track, value);
+    profileStatsBars.appendChild(row);
+  });
+}
+
+function renderProfileStatsPie(items) {
+  if (!profileStatsPie) return;
+  profileStatsPie.innerHTML = '';
+
+  const total = items.reduce((sum, item) => sum + item.minutes, 0);
+  const pie = document.createElement('div');
+  pie.className = 'stats-pie';
+
+  if (total <= 0) {
+    pie.classList.add('stats-pie-empty');
+    pie.textContent = '暂无';
+    profileStatsPie.appendChild(pie);
+    return;
+  }
+
+  let cursor = 0;
+  const segments = items.map((item) => {
+    const start = cursor;
+    cursor += (item.minutes / total) * 100;
+    return `${taskTypeColor(item.type)} ${start}% ${cursor}%`;
+  });
+  pie.style.background = `conic-gradient(${segments.join(', ')})`;
+  pie.setAttribute('aria-label', `平均每日任务时长占比：${items.map((item) => `${item.type}${formatPercent(item.minutes, total)}`).join('，')}`);
+
+  const legend = document.createElement('div');
+  legend.className = 'stats-pie-legend';
+  items.forEach((item) => {
+    const row = document.createElement('span');
+    const swatch = document.createElement('i');
+    swatch.style.background = taskTypeColor(item.type);
+    const text = document.createElement('span');
+    text.textContent = `${item.type} ${formatPercent(item.minutes, total)}`;
+    row.append(swatch, text);
+    legend.appendChild(row);
+  });
+
+  profileStatsPie.append(pie, legend);
 }
 
 function renderAll() {
+  populateJournalTagSelects();
+  renderJournalTagSettings();
   renderTasks();
   renderJournalList();
   renderSelectedJournal();
+  renderProfileStats();
 }
 
 function showPage(page) {
@@ -1069,17 +1429,17 @@ function showPage(page) {
   Object.values(pages).forEach((section) => section.classList.remove('active'));
   pages[page].classList.add('active');
   pageTitle.textContent = pageTitleFor(page);
+  if (page === 'profile') renderProfileStats();
 }
 
 async function goToCurrentTask() {
   const now = await getEffectiveNow();
   currentEffectiveNow = now;
   const date = formatLocalDate(now);
-  taskDateFilter.value = date;
+  setDateInputValue(taskDateFilter, date);
   activePlanningDates.add(date);
   showPage('tasks');
-  renderTasks();
-  updateTaskTemporalView({ scrollToCurrent: true, forceScroll: true });
+  renderTasks({ scrollToCurrent: true, forceScroll: true });
 }
 
 function mergeTasks(currentTasks, importedTasks) {
@@ -1400,13 +1760,14 @@ function checkDueReminders(now) {
   const todayTasks = tasks.filter((task) => isRenderableTask(task) && normalizeDate(task.date) === date);
   const currentCheckValue = reminderCheckValue(now);
   const previousCheckValue = lastReminderCheckValue;
+  const duePreviousValue = reminderPreviousValue(previousCheckValue, currentCheckValue);
   const dueReminders = [];
   lastReminderCheckValue = currentCheckValue;
 
   todayTasks.forEach((task, taskIndex) => {
     buildReminderEvents(task).forEach((event) => {
       const eventCheckValue = dayStartCheckValue(now) + event.minute;
-      if (!isReminderDue(previousCheckValue, currentCheckValue, eventCheckValue)) return;
+      if (!isReminderDue(duePreviousValue, currentCheckValue, eventCheckValue)) return;
       const key = `${date}|${task.id}|${event.kind}|${event.minute}`;
       if (firedReminderKeys.has(key)) return;
 
@@ -1428,6 +1789,13 @@ function checkDueReminders(now) {
     .forEach((item) => showReminderMessage(item.payload));
 
   trimOldReminderKeys(date);
+}
+
+function reminderPreviousValue(previousValue, currentValue) {
+  if (previousValue === null) return null;
+  if (currentValue < previousValue) return currentValue - 1;
+  if (currentValue - previousValue > MISSED_REMINDER_BACKLOG_LIMIT_MINUTES) return currentValue - 1;
+  return previousValue;
 }
 
 async function showReminderMessage(payload) {
@@ -1553,6 +1921,87 @@ function timeToMinutes(value) {
   return hours * 60 + minutes;
 }
 
+function taskDurationMinutes(task) {
+  const start = timeToMinutes(task.startTime);
+  const end = timeToMinutes(task.endTime);
+  if (start === null || end === null || start === end) return 0;
+  return end > start ? end - start : (24 * 60 - start) + end;
+}
+
+function taskSummaryType(task) {
+  const explicitType = clean(task.type);
+  if (!explicitType) return '未分配';
+  return TASK_TYPES.includes(explicitType) ? explicitType : '未分配';
+}
+
+function sumTaskMinutesByType(taskItems) {
+  return taskItems.reduce((summary, task) => {
+    const minutes = taskDurationMinutes(task);
+    if (minutes <= 0) return summary;
+    const type = taskSummaryType(task);
+    summary[type] = (summary[type] || 0) + minutes;
+    return summary;
+  }, Object.fromEntries(TASK_SUMMARY_TYPES.map((type) => [type, 0])));
+}
+
+function formatDurationHours(minutes) {
+  if (!Number.isFinite(minutes) || minutes <= 0) return '0小时';
+  const hours = minutes / 60;
+  const rounded = Math.round(hours * 10) / 10;
+  return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(1)}小时`;
+}
+
+function formatPercent(value, total) {
+  if (!total) return '0%';
+  return `${Math.round((value / total) * 100)}%`;
+}
+
+function normalizeTaskTypeForClass(type) {
+  if (type === '课程') return 'course';
+  if (type === '学习') return 'study';
+  if (type === '生活') return 'life';
+  if (type === '未分配') return 'unassigned';
+  return 'work';
+}
+
+function taskTypeColor(type) {
+  if (type === '课程') return '#a86bc9';
+  if (type === '学习') return '#b9892e';
+  if (type === '生活') return '#7aa35e';
+  if (type === '未分配') return '#8b96a3';
+  return '#2e8f65';
+}
+
+function dateRangeForProfileStats(rangeType, baseDate) {
+  const parsedBase = parseLocalDate(normalizeDate(baseDate));
+  const base = parsedBase || new Date();
+  const start = new Date(base.getFullYear(), base.getMonth(), base.getDate());
+  const end = new Date(start);
+
+  if (rangeType === 'day') {
+    return { start: formatLocalDate(start), end: formatLocalDate(end) };
+  }
+
+  if (rangeType === 'week') {
+    end.setTime(start.getTime());
+    end.setDate(start.getDate() + 6);
+    return { start: formatLocalDate(start), end: formatLocalDate(end) };
+  }
+
+  if (rangeType === 'month') {
+    end.setMonth(start.getMonth() + 1, start.getDate() - 1);
+    return { start: formatLocalDate(start), end: formatLocalDate(end) };
+  }
+
+  if (rangeType === 'quarter') {
+    end.setMonth(start.getMonth() + 3, start.getDate() - 1);
+    return { start: formatLocalDate(start), end: formatLocalDate(end) };
+  }
+
+  end.setFullYear(start.getFullYear() + 1, start.getMonth(), start.getDate() - 1);
+  return { start: formatLocalDate(start), end: formatLocalDate(end) };
+}
+
 function findConflictingTaskIds(taskItems) {
   const conflicted = new Set();
   const byDate = new Map();
@@ -1635,7 +2084,7 @@ function nextOrderForDate(date, counters = null) {
 
 function ensureSelectedDate() {
   if (!taskDateFilter.value) {
-    taskDateFilter.value = formatLocalDate(new Date());
+    setDateInputValue(taskDateFilter, formatLocalDate(new Date()));
   }
 
   return clean(taskDateFilter.value);
@@ -1646,8 +2095,8 @@ function mergeJournals(currentJournals, importedJournals) {
 
   importedJournals.forEach((journal) => {
     const key = journalIdentity(journal);
-    const rating = normalizeJournalRating(journal.rating);
-    if (!key || (!journal.content && rating === '无')) return;
+    const tagId = normalizeJournalTagId(journal.tagId) || legacyRatingToTagId(journal.rating);
+    if (!key || (!journal.content && !tagId)) return;
 
     journalMap.set(key, {
       id: journal.id || `journal-${Date.now()}`,
@@ -1656,7 +2105,7 @@ function mergeJournals(currentJournals, importedJournals) {
       dateRangeEnd: normalizeDate(journal.dateRangeEnd),
       sheetName: clean(journal.sheetName),
       content: clean(journal.content),
-      rating,
+      tagId: normalizeJournalTagId(tagId),
       source: clean(journal.source) || 'manual',
       updatedAt: new Date().toISOString()
     });
@@ -1670,9 +2119,10 @@ function normalizeJournalCollection(items) {
 }
 
 async function saveSelectedJournal() {
+  commitDateInput(journalDate);
   const date = clean(journalDate.value);
   const content = clean(journalContent.value);
-  const rating = normalizeJournalRating(journalRating ? journalRating.value : '无');
+  const tagId = normalizeJournalTagId(journalTag ? journalTag.value : '');
 
   if (!date) {
     journalSaveState.textContent = '请先选择日期';
@@ -1684,11 +2134,11 @@ async function saveSelectedJournal() {
     date,
     sheetName: '',
     content,
-    rating,
+    tagId,
     source: 'manual'
   }]);
 
-  if (!content && rating === '无') {
+  if (!content && !tagId) {
     journals = journals.filter((journal) => journalPrimaryDate(journal) !== date);
   }
 
@@ -1701,7 +2151,8 @@ function renderSelectedJournal() {
   const date = clean(journalDate.value);
   const journal = findJournalForDate(normalizeDate(date), date);
   journalContent.value = journal ? journal.content : '';
-  if (journalRating) journalRating.value = normalizeJournalRating(journal && journal.rating);
+  if (journalTag) journalTag.value = normalizeJournalTagId(journal && journal.tagId);
+  renderTagPicker(journalTag, journalTagPaletteButton, journalTagPalette);
   journalSaveState.textContent = journal ? '已加载' : '尚未保存';
 }
 
@@ -1730,7 +2181,10 @@ function renderJournalList() {
     });
 
     const title = document.createElement('strong');
-    title.textContent = `${journalDisplayDate(journal)}${journalRatingText(journal)}`;
+    title.innerHTML = '';
+    title.append(document.createTextNode(journalDisplayDate(journal)));
+    const tagBadge = createJournalTagBadge(journal.tagId);
+    if (tagBadge) title.appendChild(tagBadge);
     const preview = document.createElement('span');
     preview.textContent = journal.content || '这一天还没有填写生活记录。';
     item.append(title, preview);
@@ -1739,33 +2193,62 @@ function renderJournalList() {
 }
 
 function filteredJournalsForList() {
-  if (!journalRatingFilterEnabled || !journalRatingFilterEnabled.checked) return journals;
-  return journals.filter((journal) => normalizeJournalRating(journal.rating) === appliedJournalRatingFilter);
+  if (journalFilterMode === 'date') {
+    const selectedDate = normalizeDate(journalViewDate ? journalViewDate.value : '');
+    if (!selectedDate) return [];
+    return journals.filter((journal) => journalPrimaryDate(journal) === selectedDate);
+  }
+
+  if (journalFilterMode === 'tag') {
+    return journals.filter((journal) => normalizeJournalTagId(journal.tagId) === appliedJournalTagFilter);
+  }
+
+  return journals;
 }
 
 function updateJournalFilterControls() {
-  const filterEnabled = Boolean(journalRatingFilterEnabled && journalRatingFilterEnabled.checked);
-  if (journalRatingFilter) journalRatingFilter.disabled = !filterEnabled;
-  if (journalRatingFilterField) journalRatingFilterField.classList.toggle('hidden', !filterEnabled);
-  if (journalViewDateField) journalViewDateField.classList.toggle('hidden', filterEnabled);
+  if (journalFilterModeButton) journalFilterModeButton.textContent = journalFilterModeLabel(journalFilterMode);
+  if (journalTagFilter) journalTagFilter.disabled = journalFilterMode !== 'tag';
+  if (journalTagFilterPaletteButton) journalTagFilterPaletteButton.disabled = journalFilterMode !== 'tag';
+  if (journalTagFilterField) journalTagFilterField.classList.toggle('hidden', journalFilterMode !== 'tag');
+  if (journalViewDateField) journalViewDateField.classList.toggle('hidden', journalFilterMode !== 'date');
+  if (journalFilterMode !== 'tag') closeAllTagPalettes();
 }
 
-function journalRatingText(journal) {
-  const rating = normalizeJournalRating(journal && journal.rating);
-  return rating === '无' ? '' : ` · ${rating}`;
+function journalFilterModeLabel(mode) {
+  if (mode === 'date') return '日期记录';
+  if (mode === 'tag') return '标签记录';
+  return '显示全部';
+}
+
+function cycleJournalFilterMode() {
+  if (journalFilterMode === 'all') {
+    journalFilterMode = 'date';
+  } else if (journalFilterMode === 'date') {
+    journalFilterMode = 'tag';
+    appliedJournalTagFilter = normalizeJournalTagId(journalTagFilter ? journalTagFilter.value : '');
+  } else {
+    journalFilterMode = 'all';
+  }
+
+  updateJournalFilterControls();
+  renderJournalList();
+}
+
+function createJournalTagBadge(tagId) {
+  const tag = journalTagById(tagId);
+  if (!tag) return null;
+  const badge = document.createElement('span');
+  badge.className = 'journal-tag-badge';
+  badge.style.background = tag.color;
+  badge.title = tag.fullName;
+  badge.textContent = tag.shortName;
+  return badge;
 }
 
 function ensureJournalViewDate() {
   if (journalViewDate.value) return;
-  journalViewDate.value = latestJournalDate() || formatLocalDate(currentEffectiveNow || new Date());
-}
-
-function commitJournalViewDate() {
-  if (!journalViewDate.value) return;
-  const normalizedDate = normalizeDate(journalViewDate.value);
-  if (normalizedDate) {
-    journalViewDate.value = normalizedDate;
-  }
+  setDateInputValue(journalViewDate, latestJournalDate() || formatLocalDate(currentEffectiveNow || new Date()));
 }
 
 function openJournalEntry(journal) {
@@ -1773,17 +2256,14 @@ function openJournalEntry(journal) {
   renderJournalView(journal, targetDate, journalDisplayDate(journal));
 }
 
-function openJournalForDate(date) {
-  const normalizedDate = normalizeDate(date);
-  const journal = findJournalForDate(normalizedDate, date);
-  renderJournalView(journal, normalizedDate, normalizedDate || date || '未标记日期');
-}
-
 function renderJournalView(journal, targetDate, fallbackTitle) {
   const normalizedDate = normalizeDate(targetDate);
   const dayTasks = sortTasksForDisplay(tasks.filter((task) => normalizeDate(task.date) === normalizedDate));
   const title = fallbackTitle || (journal ? journalDisplayDate(journal) : normalizedDate || '未标记日期');
-  journalViewTitle.textContent = `${title}${journal ? journalRatingText(journal) : ''}`;
+  journalViewTitle.innerHTML = '';
+  journalViewTitle.append(document.createTextNode(title));
+  const tagBadge = journal ? createJournalTagBadge(journal.tagId) : null;
+  if (tagBadge) journalViewTitle.appendChild(tagBadge);
   journalViewContent.innerHTML = '';
 
   const journalSection = document.createElement('section');
@@ -1928,9 +2408,21 @@ function normalizeDate(value) {
   return `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`;
 }
 
-function normalizeJournalRating(value) {
-  const rating = clean(value) || '无';
-  return JOURNAL_RATINGS.includes(rating) ? rating : '无';
+function isCompleteDate(value) {
+  const normalized = normalizeDate(value);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return false;
+  const [year, month, day] = normalized.split('-').map(Number);
+  const parsed = new Date(year, month - 1, day);
+  return parsed.getFullYear() === year
+    && parsed.getMonth() === month - 1
+    && parsed.getDate() === day;
+}
+
+function isSelectableDate(value) {
+  if (!isCompleteDate(value)) return false;
+  const normalized = normalizeDate(value);
+  const year = Number(normalized.slice(0, 4));
+  return year >= MIN_DATE_YEAR;
 }
 
 function enumerateDates(startDate, endDate) {
@@ -1996,9 +2488,9 @@ function normalizeWeekday(value) {
 
 function parseLocalDate(date) {
   const normalized = normalizeDate(date);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return null;
-  const parsed = new Date(`${normalized}T00:00:00`);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
+  if (!isSelectableDate(normalized)) return null;
+  const [year, month, day] = normalized.split('-').map(Number);
+  return new Date(year, month - 1, day);
 }
 
 function shiftDate(date, offsetDays) {
@@ -2127,6 +2619,7 @@ function defaultProfile() {
     classBreakLength: 10,
     workFocusLength: 50,
     workBreakLength: 10,
+    journalTags: defaultJournalTags(),
     defaultsVersion: '0.2.0'
   };
 }
@@ -2141,7 +2634,8 @@ function normalizedProfile() {
 
   return {
     ...defaultProfile(),
-    ...systemTimeProfile
+    ...systemTimeProfile,
+    journalTags: normalizeJournalTags(systemTimeProfile.journalTags)
   };
 }
 
@@ -2152,6 +2646,211 @@ function loadProfileToForm() {
   classBreakLength.value = String(data.classBreakLength || 10);
   workFocusLength.value = String(data.workFocusLength || data.focusLength || 50);
   workBreakLength.value = String(data.workBreakLength || 10);
+}
+
+function defaultJournalTags() {
+  return DEFAULT_JOURNAL_TAGS.map((tag) => ({ ...tag }));
+}
+
+function normalizeJournalTags(tags) {
+  const shouldUseDefault = !Array.isArray(tags);
+  const sourceTags = shouldUseDefault ? defaultJournalTags() : tags;
+  const seen = new Set();
+  const normalized = sourceTags.map((tag, index) => {
+    const id = clean(tag && tag.id) || `tag-${Date.now()}-${index}`;
+    if (seen.has(id)) return null;
+    seen.add(id);
+    return {
+      id,
+      color: normalizeColor(tag && tag.color),
+      shortName: clean(tag && tag.shortName).slice(0, 8) || `标签${index + 1}`,
+      fullName: clean(tag && tag.fullName) || '未填写含义'
+    };
+  }).filter(Boolean);
+
+  return normalized.length > 0 || !shouldUseDefault ? normalized : defaultJournalTags();
+}
+
+function normalizeColor(value) {
+  const color = clean(value);
+  return /^#[0-9a-fA-F]{6}$/.test(color) ? color : '#64748b';
+}
+
+function journalTags() {
+  return normalizeJournalTags(profile && profile.journalTags);
+}
+
+function journalTagById(tagId) {
+  return journalTags().find((tag) => tag.id === clean(tagId)) || null;
+}
+
+function normalizeJournalTagId(value) {
+  const tagId = clean(value);
+  return journalTagById(tagId) ? tagId : '';
+}
+
+function legacyRatingToTagId(value) {
+  return LEGACY_RATING_TO_TAG_ID[clean(value)] || '';
+}
+
+function buildTagOptionText(tag) {
+  return tag ? `${tag.shortName}：${tag.fullName}` : '无标签';
+}
+
+function populateJournalTagSelects() {
+  const currentEditorValue = normalizeJournalTagId(journalTag && journalTag.value);
+  const currentFilterValue = normalizeJournalTagId(journalTagFilter && journalTagFilter.value) || appliedJournalTagFilter;
+  [journalTag, journalTagFilter].forEach((select) => {
+    if (!select) return;
+    select.innerHTML = '';
+    const emptyOption = document.createElement('option');
+    emptyOption.value = '';
+    emptyOption.textContent = '无标签';
+    select.appendChild(emptyOption);
+    journalTags().forEach((tag) => {
+      const option = document.createElement('option');
+      option.value = tag.id;
+      option.textContent = buildTagOptionText(tag);
+      select.appendChild(option);
+    });
+  });
+  if (journalTag) journalTag.value = currentEditorValue;
+  if (journalTagFilter) journalTagFilter.value = currentFilterValue;
+  renderTagPicker(journalTag, journalTagPaletteButton, journalTagPalette);
+  renderTagPicker(journalTagFilter, journalTagFilterPaletteButton, journalTagFilterPalette);
+}
+
+function renderTagPicker(select, button, palette) {
+  if (!select || !button || !palette) return;
+  const tag = journalTagById(select.value);
+  button.classList.toggle('empty', !tag);
+  button.style.background = tag ? tag.color : 'transparent';
+  button.title = tag ? `${tag.shortName}：${tag.fullName}` : '无标签';
+
+  palette.innerHTML = '';
+  const emptyButton = createTagPaletteItem(null, select, button, palette);
+  palette.appendChild(emptyButton);
+  journalTags().forEach((item) => {
+    palette.appendChild(createTagPaletteItem(item, select, button, palette));
+  });
+}
+
+function createTagPaletteItem(tag, select, button, palette) {
+  const item = document.createElement('button');
+  item.type = 'button';
+  item.className = 'tag-palette-item';
+  item.classList.toggle('empty', !tag);
+  item.style.background = tag ? tag.color : 'transparent';
+  item.title = tag ? `${tag.shortName}：${tag.fullName}` : '无标签';
+  item.setAttribute('aria-label', item.title);
+  item.addEventListener('click', (event) => {
+    event.stopPropagation();
+    select.value = tag ? tag.id : '';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    palette.classList.add('hidden');
+    button.focus();
+  });
+  return item;
+}
+
+function toggleTagPalette(palette) {
+  if (!palette) return;
+  const shouldOpen = palette.classList.contains('hidden');
+  closeAllTagPalettes();
+  palette.classList.toggle('hidden', !shouldOpen);
+}
+
+function closeAllTagPalettes() {
+  [journalTagPalette, journalTagFilterPalette].forEach((palette) => {
+    if (palette) palette.classList.add('hidden');
+  });
+}
+
+function closeTagPalettesOnOutsideClick(event) {
+  if (event.target.closest('.tag-select-control')) return;
+  closeAllTagPalettes();
+}
+
+function renderJournalTagSettings() {
+  if (!journalTagSettingsList) return;
+  journalTagSettingsList.innerHTML = '';
+
+  journalTags().forEach((tag) => {
+    const row = document.createElement('div');
+    row.className = 'tag-settings-row';
+    row.dataset.tagId = tag.id;
+
+    const color = document.createElement('input');
+    color.type = 'color';
+    color.value = tag.color;
+    color.setAttribute('aria-label', '标签颜色');
+    color.addEventListener('input', () => updateJournalTag(tag.id, 'color', color.value));
+
+    const shortName = document.createElement('input');
+    shortName.type = 'text';
+    shortName.maxLength = 8;
+    shortName.value = tag.shortName;
+    shortName.placeholder = '简称';
+    shortName.addEventListener('blur', () => updateJournalTag(tag.id, 'shortName', shortName.value));
+    shortName.addEventListener('keydown', blurOnEnter);
+
+    const fullName = document.createElement('input');
+    fullName.type = 'text';
+    fullName.value = tag.fullName;
+    fullName.placeholder = '全称 / 含义';
+    fullName.addEventListener('blur', () => updateJournalTag(tag.id, 'fullName', fullName.value));
+    fullName.addEventListener('keydown', blurOnEnter);
+
+    const deleteButton = document.createElement('button');
+    deleteButton.className = 'delete-table-row';
+    deleteButton.type = 'button';
+    deleteButton.textContent = '-';
+    deleteButton.setAttribute('aria-label', '删除标签');
+    deleteButton.addEventListener('click', () => deleteJournalTag(tag.id));
+
+    row.append(color, shortName, fullName, deleteButton);
+    journalTagSettingsList.appendChild(row);
+  });
+}
+
+async function updateJournalTag(tagId, field, value) {
+  const tags = journalTags();
+  const target = tags.find((tag) => tag.id === tagId);
+  if (!target) return;
+  if (field === 'color') target.color = normalizeColor(value);
+  if (field === 'shortName') target.shortName = clean(value).slice(0, 8) || target.shortName;
+  if (field === 'fullName') target.fullName = clean(value) || target.fullName;
+  profile = { ...normalizedProfile(), journalTags: tags };
+  await saveState();
+  populateJournalTagSelects();
+  renderJournalList();
+}
+
+async function addJournalTag() {
+  const tags = journalTags();
+  tags.push({
+    id: `tag-${Date.now()}`,
+    color: '#64748b',
+    shortName: `标签${tags.length + 1}`,
+    fullName: '新的标签含义'
+  });
+  profile = { ...normalizedProfile(), journalTags: tags };
+  await saveState();
+  renderJournalTagSettings();
+  populateJournalTagSelects();
+}
+
+async function deleteJournalTag(tagId) {
+  const tags = journalTags().filter((tag) => tag.id !== tagId);
+  profile = { ...normalizedProfile(), journalTags: tags };
+  journals = journals.map((journal) => (
+    clean(journal.tagId) === tagId ? { ...journal, tagId: '' } : journal
+  ));
+  await saveState();
+  renderJournalTagSettings();
+  populateJournalTagSelects();
+  renderJournalList();
+  renderSelectedJournal();
 }
 
 async function saveProfileFromForm() {
@@ -2181,20 +2880,25 @@ async function initializeAppData() {
   try {
     const result = await window.whbr.loadData();
     tasks = result.data.tasks || [];
-    journals = normalizeJournalCollection(result.data.journals || []);
     profile = {
       ...defaultProfile(),
       ...(result.data.profile || {})
     };
-    storagePaths = result.paths || storagePaths;
     const migratedProfile = migrateProfileDefaults(profile);
     profile = migratedProfile.profile;
-    journalViewDate.value = latestJournalDate() || journalDate.value || formatLocalDate(new Date());
+    journals = normalizeJournalCollection(result.data.journals || []);
+    storagePaths = result.paths || storagePaths;
+    setDateInputValue(journalViewDate, latestJournalDate() || journalDate.value || formatLocalDate(new Date()));
     loadProfileToForm();
+    populateJournalTagSelects();
+    renderJournalTagSettings();
     await migrateLegacyLocalStorageIfNeeded();
     if (migratedProfile.changed) await saveState();
     updateStoragePathView();
     renderAll();
+    if (pages.tasks.classList.contains('active')) {
+      renderTasks({ scrollToCurrent: true, forceScroll: true });
+    }
     updateJournalFilterControls();
   } catch (error) {
     setStatus(`加载数据失败：${error.message}`, '');
@@ -2204,6 +2908,11 @@ async function initializeAppData() {
 function migrateProfileDefaults(profileData) {
   const migrated = { ...profileData };
   let changed = false;
+  const normalizedTags = normalizeJournalTags(migrated.journalTags);
+  if (JSON.stringify(migrated.journalTags || []) !== JSON.stringify(normalizedTags)) {
+    migrated.journalTags = normalizedTags;
+    changed = true;
+  }
   if (migrated.defaultsVersion !== '0.2.0') {
     if (Number(migrated.classDuration) === 45) {
       migrated.classDuration = 50;
@@ -2275,21 +2984,17 @@ async function chooseDataPath() {
   updateStoragePathView();
 }
 
-async function chooseSettingsPath() {
-  const result = await window.whbr.chooseSettingsPath({ tasks, journals, profile });
-
-  if (result.canceled) {
-    return;
+async function openDataPath() {
+  const result = await window.whbr.openDataPath();
+  if (result && result.error) {
+    setStatus(`打开文件夹失败：${result.error}`, 'error', 3000);
   }
-
-  storagePaths = result.paths || storagePaths;
-  updateStoragePathView();
 }
 
 function openDeleteDayModal() {
   deleteMode = 'day';
   if (!deleteDayDate.value) {
-    deleteDayDate.value = taskDateFilter.value || new Date().toISOString().slice(0, 10);
+    setDateInputValue(deleteDayDate, taskDateFilter.value || formatLocalDate(new Date()));
   }
   resetTitle.textContent = '删除当天数据';
   resetDescription.textContent = `确认后会删除 ${deleteDayDate.value} 的全部任务安排和每日生活记录。`;
@@ -2422,9 +3127,11 @@ async function startApp() {
   await applyAppIcon();
   await applyAppVersion();
   const today = formatLocalDate(new Date());
-  journalDate.value = today;
-  taskDateFilter.value = today;
-  deleteDayDate.value = today;
+  setDateInputValue(journalDate, today);
+  setDateInputValue(taskDateFilter, today);
+  setDateInputValue(deleteDayDate, today);
+  committedProfileStatsStartDate = today;
+  setDateInputValue(profileStatsStartDate, today);
 
   await initializeAppData();
   await refreshSystemTime();
