@@ -4,8 +4,12 @@ const { pathToFileURL } = require('url');
 const fsSync = require('fs');
 const fs = require('fs/promises');
 const { parseScheduleFile } = require('./src/parsers/scheduleParser');
+const { parseTaskTextList } = require('./src/parsers/taskTextParser');
 const { getStoragePaths, loadData, resetData, saveData, setStorageDirectory } = require('./src/storage/localDataStore');
 const { autoUpdater } = require('electron-updater');
+const { ASR_MODEL_CONFIG } = require('./src/asr/asrModelConfig');
+const { createAsrModelManager } = require('./src/asr/modelManager');
+const { createAsrService } = require('./src/asr/asrService');
 
 const scheduleFileExtensions = ['xlsx', 'xls', 'csv', 'tsv'];
 const allowedExtensions = new Set(scheduleFileExtensions.map((extension) => `.${extension}`));
@@ -19,6 +23,7 @@ let tray = null;
 let isQuitting = false;
 let isClosePromptShowing = false;
 let isUpdatePromptShowing = false;
+let asrService = null;
 
 if (process.platform === 'win32') {
   app.setAppUserModelId('com.rizhi.pc');
@@ -42,6 +47,7 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
+  configureMicrophonePermissionPolicy(mainWindow);
 
   mainWindow.on('close', async (event) => {
     if (isQuitting) return;
@@ -166,6 +172,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   isQuitting = true;
+  if (asrService) void asrService.dispose();
 });
 
 function createTray() {
@@ -359,6 +366,69 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
+function configureMicrophonePermissionPolicy(window) {
+  const session = window.webContents.session;
+  const isCurrentMainWindow = (webContents) => (
+    Boolean(mainWindow) && !mainWindow.isDestroyed() && webContents === mainWindow.webContents
+  );
+
+  // Allow only this local top-level window to ask for audio input. This keeps
+  // Electron's default broad permission behavior from applying to other media.
+  session.setPermissionCheckHandler((webContents, permission, _origin, details) => (
+    permission === 'media' && details && details.mediaType === 'audio' && isCurrentMainWindow(webContents)
+  ));
+  session.setPermissionRequestHandler((webContents, permission, callback, details) => {
+    const mediaTypes = details && Array.isArray(details.mediaTypes) ? details.mediaTypes : [];
+    callback(permission === 'media' && mediaTypes.length === 1 && mediaTypes[0] === 'audio' && isCurrentMainWindow(webContents));
+  });
+}
+
+function getAsrService() {
+  if (asrService) return asrService;
+
+  const developmentModelDirectory = app.isPackaged
+    ? ''
+    : path.join(__dirname, 'dev_models', ASR_MODEL_CONFIG.modelId);
+    const modelManager = createAsrModelManager({ app, developmentModelDirectory });
+    asrService = createAsrService({ app, modelManager });
+    asrService.on('partial-result', (payload) => sendAsrEvent('asr:partial', payload));
+    asrService.on('final-result', (payload) => sendAsrEvent('asr:final', payload));
+    asrService.on('vad-state', (payload) => sendAsrEvent('asr:vad', payload));
+    asrService.on('recording-limit', (payload) => sendAsrEvent('asr:limit', payload));
+    asrService.on('asr-error', (error) => sendAsrEvent('asr:error', serializeAsrError(error)));
+  return asrService;
+}
+
+function sendAsrEvent(channel, payload) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send(channel, payload);
+}
+
+function isMainWindowSender(event) {
+  return Boolean(mainWindow) && !mainWindow.isDestroyed() && event.sender === mainWindow.webContents;
+}
+
+function serializeAsrError(error) {
+  return {
+    code: error && error.code ? error.code : 'ASR_ERROR',
+    message: error && error.message ? error.message : '语音识别出现未知错误。'
+  };
+}
+
+function createAsrIpcResponse(action) {
+  return async (event) => {
+    if (!isMainWindowSender(event)) {
+      return { ok: false, error: { code: 'ASR_IPC_DENIED', message: '不允许的 ASR IPC 请求。' } };
+    }
+    try {
+      const result = await action(getAsrService());
+      return { ok: true, ...result };
+    } catch (error) {
+      return { ok: false, error: serializeAsrError(error) };
+    }
+  };
+}
+
 ipcMain.handle('system:getTime', () => {
   const now = new Date();
   return {
@@ -374,6 +444,81 @@ ipcMain.handle('app:getIconUrl', () => {
 
 ipcMain.handle('app:getVersion', () => {
   return app.getVersion();
+});
+ipcMain.handle('task:parseText', (event, payload = {}) => {
+  if (!isMainWindowSender(event)) {
+    return { ok: false, error: { code: 'TASK_PARSE_IPC_DENIED', message: '不允许的任务解析请求。' } };
+  }
+
+  return {
+    ok: true,
+    result: parseTaskTextList(payload.text, { referenceDate: payload.referenceDate })
+  };
+});
+
+
+ipcMain.handle('asr:initialize', createAsrIpcResponse(async (service) => {
+  const result = await service.initialize();
+  return {
+    sampleRate: result.model.runtimeConfig.sampleRate,
+    modelReady: result.model.isReady,
+    state: result.state,
+    cached: Boolean(result.cached)
+  };
+}));
+
+ipcMain.handle('asr:modelStatus', createAsrIpcResponse(async (service) => (
+  service.modelManager.getStatus()
+)));
+
+ipcMain.handle('asr:downloadModel', createAsrIpcResponse(async (service) => {
+  const status = await service.modelManager.download((progress) => {
+    sendAsrEvent('asr:model-status', progress);
+  });
+  sendAsrEvent('asr:model-status', status);
+  return status;
+}));
+
+ipcMain.handle('asr:openModelDirectory', createAsrIpcResponse(async (service) => {
+  const directory = service.modelManager.getDownloadDirectory();
+  await fs.mkdir(directory, { recursive: true });
+  const error = await shell.openPath(directory);
+  return { opened: !error, directory, error };
+}));
+
+ipcMain.handle('asr:start', createAsrIpcResponse(async (service) => {
+  const result = await service.start();
+  return { ...result };
+}));
+
+ipcMain.handle('asr:stop', createAsrIpcResponse(async (service) => {
+  const result = await service.stop();
+  return { ...result };
+}));
+
+ipcMain.handle('asr:cancel', createAsrIpcResponse(async (service) => {
+  const result = await service.cancel();
+  return { ...result };
+}));
+
+ipcMain.on('asr:audio', (event, payload = {}) => {
+  if (!isMainWindowSender(event)) return;
+  const sampleRate = Number(payload.sampleRate);
+  const rawSamples = payload.samples;
+  let samples = null;
+
+  if (rawSamples instanceof ArrayBuffer) {
+    samples = new Float32Array(rawSamples);
+  } else if (ArrayBuffer.isView(rawSamples)) {
+    samples = new Float32Array(rawSamples.buffer, rawSamples.byteOffset, rawSamples.byteLength / Float32Array.BYTES_PER_ELEMENT);
+  }
+  if (!samples || !samples.length) return;
+
+  try {
+    getAsrService().acceptAudioFrame(new Float32Array(samples), sampleRate);
+  } catch (error) {
+    sendAsrEvent('asr:error', serializeAsrError(error));
+  }
 });
 
 ipcMain.handle('dialog:messageBox', async (_event, options = {}) => {

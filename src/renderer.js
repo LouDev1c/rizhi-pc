@@ -11,22 +11,35 @@ const pages = {
 };
 const TASK_TYPES = ['工作', '课程', '学习', '生活'];
 const TASK_SUMMARY_TYPES = [...TASK_TYPES, '未分配'];
-const DEFAULT_JOURNAL_TAGS = [
-  { id: 'legacy-1', color: '#9ca3af', shortName: '低', fullName: '状态较低，需要复盘和调整的日子' },
-  { id: 'legacy-2', color: '#60a5fa', shortName: '缓', fullName: '节奏偏缓但仍有推进的日子' },
-  { id: 'legacy-3', color: '#34d399', shortName: '稳', fullName: '整体平稳、按计划进行的日子' },
-  { id: 'legacy-4', color: '#f59e0b', shortName: '好', fullName: '状态较好、完成度较高的日子' },
-  { id: 'legacy-5', color: '#ef4444', shortName: '亮', fullName: '高光日、值得特别标记的日子' }
-];
-const LEGACY_RATING_TO_TAG_ID = {
-  '一星': 'legacy-1',
-  '二星': 'legacy-2',
-  '三星': 'legacy-3',
-  '四星': 'legacy-4',
-  '五星': 'legacy-5'
-};
-const MIN_DATE_YEAR = 1949;
-const MIN_DATE_VALUE = '1949-01-01';
+const MICROPHONE_TEST_SAMPLE_RATE = 48000;
+const {
+  MIN_DATE_VALUE,
+  enumerateDates,
+  formatClockDate,
+  formatClockTime,
+  formatLocalDate,
+  isCompleteDate,
+  isSelectableDate,
+  normalizeDate,
+  parseLocalDate,
+  sanitizeDateSegmentLengths,
+  shiftDate,
+  weekdayFromDate
+} = globalThis.RizhiDateUtils;
+const {
+  extractTimeRangeFromInput,
+  formatTimeRangeInput,
+  inputRangeToComparableIntervals,
+  isValidClockPart,
+  normalizeTime,
+  rangesOverlap,
+  rangeToComparableIntervals,
+  timeToMinutes
+} = globalThis.RizhiTaskTimeUtils;
+const {
+  DEFAULT_JOURNAL_TAGS,
+  legacyRatingToTagId
+} = globalThis.RizhiJournalTags;
 const emptyState = document.querySelector('#emptyState');
 const taskWorkspace = document.querySelector('#taskWorkspace');
 const taskList = document.querySelector('#taskList');
@@ -45,6 +58,10 @@ const journalTagPalette = document.querySelector('#journalTagPalette');
 const journalContent = document.querySelector('#journalContent');
 const saveJournalButton = document.querySelector('#saveJournalButton');
 const journalSaveState = document.querySelector('#journalSaveState');
+const journalVoiceStartButton = document.querySelector('#journalVoiceStartButton');
+const journalVoiceCancelButton = document.querySelector('#journalVoiceCancelButton');
+const journalVoiceTimer = document.querySelector('#journalVoiceTimer');
+const journalVoiceStatus = document.querySelector('#journalVoiceStatus');
 const journalFilterModeButton = document.querySelector('#journalFilterModeButton');
 const journalTagFilter = document.querySelector('#journalTagFilter');
 const journalTagFilterPaletteButton = document.querySelector('#journalTagFilterPaletteButton');
@@ -53,10 +70,36 @@ const journalTagFilterField = document.querySelector('#journalTagFilterField');
 const journalViewDateField = document.querySelector('#journalViewDateField');
 const journalViewDate = document.querySelector('#journalViewDate');
 const journalList = document.querySelector('#journalList');
+const recordsLayout = document.querySelector('.records-layout');
+const journalEditorPanel = document.querySelector('#journalEditorPanel');
+const recordsListPanel = document.querySelector('#recordsListPanel');
+const showJournalListButton = document.querySelector('#showJournalListButton');
+const backToJournalEditorButton = document.querySelector('#backToJournalEditorButton');
 const dataFilePath = document.querySelector('#dataFilePath');
 const settingsFilePath = document.querySelector('#settingsFilePath');
+const modelDownloadPath = document.querySelector('#modelDownloadPath');
 const chooseDataPathButton = document.querySelector('#chooseDataPathButton');
 const openDataPathButton = document.querySelector('#openDataPathButton');
+const changeSettingsPathButton = document.querySelector('#changeSettingsPathButton');
+const openSettingsPathButton = document.querySelector('#openSettingsPathButton');
+const openModelDirectoryButton = document.querySelector('#openModelDirectoryButton');
+const settingsMenuButtons = document.querySelectorAll('.settings-menu-item');
+const settingsPanels = document.querySelectorAll('[data-settings-panel].panel');
+const settingsEmptyPanel = document.querySelector('#settingsEmptyPanel');
+const asrTestStartButton = document.querySelector('#asrTestStartButton');
+const asrTestStopButton = document.querySelector('#asrTestStopButton');
+const asrTestStatus = document.querySelector('#asrTestStatus');
+const asrModelStatus = document.querySelector('#asrModelStatus');
+const asrModelDownloadButton = document.querySelector('#asrModelDownloadButton');
+const settingsAsrDownloadProgress = document.querySelector('#settingsAsrDownloadProgress');
+const asrPartialResult = document.querySelector('#asrPartialResult');
+const asrFinalResult = document.querySelector('#asrFinalResult');
+const asrInputDeviceSelect = document.querySelector('#asrInputDeviceSelect');
+const asrRefreshDevicesButton = document.querySelector('#asrRefreshDevicesButton');
+const asrMicTestStartButton = document.querySelector('#asrMicTestStartButton');
+const asrMicTestStopButton = document.querySelector('#asrMicTestStopButton');
+const asrInputWaveform = document.querySelector('#asrInputWaveform');
+const asrInputFeedback = document.querySelector('#asrInputFeedback');
 const journalTagSettingsList = document.querySelector('#journalTagSettingsList');
 const addJournalTagButton = document.querySelector('#addJournalTagButton');
 const deleteDayDate = document.querySelector('#deleteDayDate');
@@ -98,8 +141,13 @@ const addScheduleRowButton = document.querySelector('#addScheduleRowButton');
 const cancelScheduleTableButton = document.querySelector('#cancelScheduleTableButton');
 const saveScheduleTableButton = document.querySelector('#saveScheduleTableButton');
 const dailyPlanTableModal = document.querySelector('#dailyPlanTableModal');
-const closeDailyPlanTableModalButton = document.querySelector('#closeDailyPlanTableModalButton');
-const dailyPlanSingleDay = document.querySelector('#dailyPlanSingleDay');
+const dailyPlanModalCard = dailyPlanTableModal && dailyPlanTableModal.querySelector('.daily-plan-modal-card');
+const dailyPlanLaunchPanel = document.querySelector('#dailyPlanLaunchPanel');
+const dailyPlanVoicePage = document.querySelector('#dailyPlanVoicePage');
+const openDailyPlanVoicePageButton = document.querySelector('#openDailyPlanVoicePageButton');
+const backDailyPlanVoicePageButton = document.querySelector('#backDailyPlanVoicePageButton');
+const closeDailyPlanVoicePageButton = document.querySelector('#closeDailyPlanVoicePageButton');
+const dailyPlanMultiDay = document.querySelector('#dailyPlanMultiDay');
 const dailyPlanSingleDateRow = document.querySelector('#dailyPlanSingleDateRow');
 const dailyPlanRangeRow = document.querySelector('#dailyPlanRangeRow');
 const dailyPlanDate = document.querySelector('#dailyPlanDate');
@@ -109,11 +157,23 @@ const dailyPlanTableBody = document.querySelector('#dailyPlanTableBody');
 const addDailyPlanRowButton = document.querySelector('#addDailyPlanRowButton');
 const cancelDailyPlanTableButton = document.querySelector('#cancelDailyPlanTableButton');
 const saveDailyPlanTableButton = document.querySelector('#saveDailyPlanTableButton');
+const dailyPlanVoiceStartButton = document.querySelector('#dailyPlanVoiceStartButton');
+const dailyPlanVoiceCancelButton = document.querySelector('#dailyPlanVoiceCancelButton');
+const dailyPlanVoiceConfirmButton = document.querySelector('#dailyPlanVoiceConfirmButton');
+const dailyPlanVoiceStatus = document.querySelector('#dailyPlanVoiceStatus');
+const dailyPlanVoiceTimer = document.querySelector('#dailyPlanVoiceTimer');
+const dailyPlanVoiceText = document.querySelector('#dailyPlanVoiceText');
+const dailyPlanVoiceApplyButton = document.querySelector('#dailyPlanVoiceApplyButton');
 const journalViewModal = document.querySelector('#journalViewModal');
 const journalViewTitle = document.querySelector('#journalViewTitle');
 const journalViewContent = document.querySelector('#journalViewContent');
 const closeJournalViewModalButton = document.querySelector('#closeJournalViewModalButton');
 const closeJournalViewButton = document.querySelector('#closeJournalViewButton');
+const journalUnsavedModal = document.querySelector('#journalUnsavedModal');
+const closeJournalUnsavedModalButton = document.querySelector('#closeJournalUnsavedModalButton');
+const discardJournalChangesButton = document.querySelector('#discardJournalChangesButton');
+const cancelJournalNavigationButton = document.querySelector('#cancelJournalNavigationButton');
+const saveJournalBeforeLeaveButton = document.querySelector('#saveJournalBeforeLeaveButton');
 const classDuration = document.querySelector('#classDuration');
 const classBreakLength = document.querySelector('#classBreakLength');
 const workFocusLength = document.querySelector('#workFocusLength');
@@ -145,6 +205,7 @@ let storagePaths = {
   settingsFilePath: '',
   legacyStorageKeys: ['whbr.tasks', 'whbr.journals']
 };
+let asrModelDownloadDirectory = '';
 let editingTaskId = '';
 let draggedTaskId = '';
 let deleteMode = 'all';
@@ -156,7 +217,58 @@ let tutorialStepIndex = 0;
 let previousTutorialPage = 'tasks';
 let appliedJournalTagFilter = '';
 let journalFilterMode = 'all';
+let recordsView = 'editor';
 let committedProfileStatsStartDate = '';
+let pendingJournalUnsavedResolver = null;
+let journalDateChangePending = false;
+let asrTestCapture = null;
+let asrTestCaptureUnsubscribe = null;
+let asrTestRecording = false;
+let asrModelDownloadInFlight = false;
+let latestAsrModelStatus = null;
+let microphoneTestCapture = null;
+let microphoneTestUnsubscribe = null;
+let microphoneTestRecording = false;
+let microphoneSilenceTimer = null;
+let lastMicrophoneSoundAt = 0;
+let journalVoiceCapture = null;
+let journalVoiceCaptureUnsubscribe = null;
+let journalVoiceRecording = false;
+let journalVoiceProcessing = false;
+let journalVoiceCanceled = false;
+let journalVoiceInsertionPoint = null;
+let journalVoiceFinalInserted = false;
+let journalLastCursorPosition = null;
+let journalVoiceHasInsertedSegment = false;
+let journalVoiceOriginalContent = '';
+let journalVoiceOriginalInsertionPoint = null;
+let journalVoiceSilenceTimer = null;
+let journalVoiceLastSoundAt = 0;
+let journalVoiceWarningTimer = null;
+let journalVoiceMaximumTimer = null;
+let journalVoiceTimerInterval = null;
+let journalVoiceRecordingStartedAt = 0;
+let journalVoiceConversionStartedAt = 0;
+let journalVoiceCapturedSeconds = 0;
+let journalVoiceDecodedSeconds = 0;
+let journalVoiceDecodeRealtimeFactor = 0;
+let dailyPlanVoiceCapture = null;
+let dailyPlanVoiceCaptureUnsubscribe = null;
+let dailyPlanVoiceRecording = false;
+let dailyPlanVoiceCanceled = false;
+let dailyPlanVoiceFinalReceived = false;
+let dailyPlanVoiceProcessing = false;
+let dailyPlanVoiceWarningActive = false;
+let dailyPlanVoiceWarningTimer = null;
+let dailyPlanVoiceMaximumTimer = null;
+let dailyPlanVoiceTimerInterval = null;
+let dailyPlanVoiceRecordingStartedAt = 0;
+let dailyPlanVoiceConversionStartedAt = 0;
+let dailyPlanVoiceCapturedSeconds = 0;
+let dailyPlanVoiceDecodedSeconds = 0;
+let dailyPlanVoiceDecodeRealtimeFactor = 0;
+let dailyPlanVoiceParsedCandidates = [];
+let dailyPlanVoiceParsedText = '';
 const firedReminderKeys = new Set();
 const activePlanningDates = new Set();
 const dateInputControllers = new WeakMap();
@@ -170,12 +282,21 @@ const tutorialSteps = [
   },
   {
     page: 'records',
-    targetSelector: '.journal-editor .section-head',
+    recordsView: 'editor',
+    targetSelector: '.journal-editor',
     title: '每日生活记录',
-    text: '每日记录用于写下当天的活动、状态和复盘内容，帮助你保留每天的生活脉络。'
+    text: '这里用于写下当天的活动、状态和复盘内容。填写区内容较多时会在文本框内滚动，页面本身保持稳定。'
   },
   {
     page: 'records',
+    recordsView: 'editor',
+    targetSelector: '#showJournalListButton',
+    title: '查看记录列表',
+    text: '保存记录旁边可以进入记录列表；平时记录页只显示每日生活记录，减少页面上下滚动和干扰。'
+  },
+  {
+    page: 'records',
+    recordsView: 'list',
     targetSelector: '#journalFilterModeButton',
     title: '记录列表',
     text: '这个按钮有三档：显示全部、日期记录、标签记录。显示全部会列出所有记录，日期记录会按选定日期筛选，标签记录会按色块标签筛选；点击记录条即可查看当天详情。'
@@ -189,18 +310,21 @@ const tutorialSteps = [
   },
   {
     page: 'settings',
+    settingPanel: 'data',
     targetSelector: '.settings-data-panel',
     title: '数据文件',
     text: '个人记录与软件设置会存放在这里显示的文件夹中。可以选择新的保存文件夹，也可以直接打开本地文件夹做备份或迁移。'
   },
   {
     page: 'settings',
+    settingPanel: 'tags',
     targetSelector: '.settings-tags-panel',
     title: '标签',
     text: '标签用纯色块标记每日记录。可以新增、删除和调整颜色，并用简称与全称说明每种日子的含义。'
   },
   {
     page: 'settings',
+    settingPanel: 'reminders',
     targetSelector: '.settings-reminder-panel',
     title: '周期设置',
     text: '课程、工作和学习的提醒周期在这里调整，日织会按这些信息提醒你专注、休息或活动身体。'
@@ -219,14 +343,36 @@ const tutorialSteps = [
 ];
 
 navItems.forEach((item) => {
-  item.addEventListener('click', () => {
-    if (item.dataset.page === 'tasks') {
+  item.addEventListener('click', async () => {
+    const targetPage = item.dataset.page;
+    if (!(await confirmLeaveRecordsPageIfNeeded(targetPage))) return;
+    if (targetPage === 'tasks') {
       goToCurrentTask();
       return;
     }
-    showPage(item.dataset.page);
+    showPage(targetPage);
   });
 });
+
+settingsMenuButtons.forEach((button) => {
+  button.addEventListener('click', () => showSettingsPanel(button.dataset.settingsPanel));
+});
+
+if (asrTestStartButton) asrTestStartButton.addEventListener('click', startRecording);
+if (asrTestStopButton) asrTestStopButton.addEventListener('click', stopRecording);
+if (asrModelDownloadButton) asrModelDownloadButton.addEventListener('click', downloadAsrModelFromSettings);
+if (asrRefreshDevicesButton) asrRefreshDevicesButton.addEventListener('click', refreshAudioInputDevices);
+if (asrMicTestStartButton) asrMicTestStartButton.addEventListener('click', startMicrophoneTest);
+if (asrMicTestStopButton) asrMicTestStopButton.addEventListener('click', stopMicrophoneTest);
+if (journalVoiceStartButton) journalVoiceStartButton.addEventListener('click', toggleJournalVoiceInput);
+if (journalVoiceCancelButton) journalVoiceCancelButton.addEventListener('click', cancelJournalVoiceInput);
+if (journalContent) {
+  ['focus', 'click', 'keyup', 'select', 'input'].forEach((eventName) => {
+    journalContent.addEventListener(eventName, rememberJournalCursorPosition);
+  });
+  journalContent.addEventListener('input', updateJournalDirtyState);
+}
+subscribeToAsrTestEvents();
 
 document.querySelectorAll('.date-step-button').forEach((button) => {
   button.addEventListener('mousedown', (event) => event.preventDefault());
@@ -243,12 +389,23 @@ if (tutorialCloseButton) tutorialCloseButton.addEventListener('click', finishTut
 tutorialConfirmModal.addEventListener('click', (event) => {
   if (event.target === tutorialConfirmModal) closeTutorialConfirmModal();
 });
+if (closeJournalUnsavedModalButton) closeJournalUnsavedModalButton.addEventListener('click', () => resolveJournalUnsavedChoice('cancel'));
+if (discardJournalChangesButton) discardJournalChangesButton.addEventListener('click', () => resolveJournalUnsavedChoice('discard'));
+if (cancelJournalNavigationButton) cancelJournalNavigationButton.addEventListener('click', () => resolveJournalUnsavedChoice('cancel'));
+if (saveJournalBeforeLeaveButton) saveJournalBeforeLeaveButton.addEventListener('click', () => resolveJournalUnsavedChoice('save'));
+if (journalUnsavedModal) {
+  journalUnsavedModal.addEventListener('click', (event) => {
+    if (event.target === journalUnsavedModal) resolveJournalUnsavedChoice('cancel');
+  });
+}
 window.addEventListener('resize', () => {
   if (!tutorialOverlay.classList.contains('hidden')) positionTutorialOverlay();
 });
 document.addEventListener('click', closeTagPalettesOnOutsideClick);
 
-backToCurrentTaskButton.addEventListener('click', goToCurrentTask);
+backToCurrentTaskButton.addEventListener('click', async () => {
+  if (await confirmLeaveRecordsPageIfNeeded('tasks')) goToCurrentTask();
+});
 if (manualTaskButton) manualTaskButton.addEventListener('click', openImportChoiceModal);
 reusePreviousButton.addEventListener('click', reusePreviousDay);
 if (importFileButton) importFileButton.addEventListener('click', openImportChoiceModal);
@@ -278,6 +435,9 @@ window.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && !journalViewModal.classList.contains('hidden')) {
     closeJournalViewModal();
   }
+  if (event.key === 'Escape' && journalUnsavedModal && !journalUnsavedModal.classList.contains('hidden')) {
+    resolveJournalUnsavedChoice('cancel');
+  }
   if (event.key === 'Escape' && !tutorialConfirmModal.classList.contains('hidden')) {
     closeTutorialConfirmModal();
   }
@@ -289,6 +449,7 @@ function isSaveShortcut(event) {
 
 function canSaveJournalWithShortcut() {
   if (!pages.records.classList.contains('active')) return false;
+  if (recordsView !== 'editor') return false;
   return [
     resetModal,
     taskEditModal,
@@ -296,6 +457,7 @@ function canSaveJournalWithShortcut() {
     scheduleTableModal,
     dailyPlanTableModal,
     journalViewModal,
+    journalUnsavedModal,
     tutorialConfirmModal
   ].every((modal) => modal.classList.contains('hidden'));
 }
@@ -316,24 +478,29 @@ registerDateInput(profileStatsStartDate, {
   }
 });
 if (profileStatsPeriod) profileStatsPeriod.addEventListener('change', renderProfileStats);
-registerDateInput(journalDate, { onCommit: renderSelectedJournal });
-if (journalTag) journalTag.addEventListener('change', () => renderTagPicker(journalTag, journalTagPaletteButton, journalTagPalette));
+registerDateInput(journalDate, { onCommit: handleJournalDateCommit });
+if (journalTag) journalTag.addEventListener('change', () => {
+  renderTagPicker(journalTag, journalTagPaletteButton, journalTagPalette);
+  updateJournalDirtyState();
+});
 if (journalTagFilter) {
   journalTagFilter.addEventListener('change', () => {
     renderTagPicker(journalTagFilter, journalTagFilterPaletteButton, journalTagFilterPalette);
     if (journalFilterMode === 'tag') {
       appliedJournalTagFilter = normalizeJournalTagId(journalTagFilter.value);
-      renderJournalList();
+      renderJournalListPreservingScroll();
     }
   });
 }
 if (journalTagPaletteButton) journalTagPaletteButton.addEventListener('click', () => toggleTagPalette(journalTagPalette));
 if (journalTagFilterPaletteButton) journalTagFilterPaletteButton.addEventListener('click', () => toggleTagPalette(journalTagFilterPalette));
 if (journalFilterModeButton) journalFilterModeButton.addEventListener('click', cycleJournalFilterMode);
+if (showJournalListButton) showJournalListButton.addEventListener('click', () => showRecordsView('list'));
+if (backToJournalEditorButton) backToJournalEditorButton.addEventListener('click', () => showRecordsView('editor'));
 saveJournalButton.addEventListener('click', saveSelectedJournal);
 registerDateInput(journalViewDate, {
   onCommit: () => {
-    if (journalFilterMode === 'date') renderJournalList();
+    if (journalFilterMode === 'date') renderJournalListPreservingScroll();
   }
 });
 registerDateInput(deleteDayDate);
@@ -344,6 +511,9 @@ registerDateInput(dailyPlanStartDate, { onCommit: constrainDailyPlanEndDate });
 registerDateInput(dailyPlanEndDate);
 chooseDataPathButton.addEventListener('click', chooseDataPath);
 if (openDataPathButton) openDataPathButton.addEventListener('click', openDataPath);
+if (changeSettingsPathButton) changeSettingsPathButton.addEventListener('click', chooseDataPath);
+if (openSettingsPathButton) openSettingsPathButton.addEventListener('click', openDataPath);
+if (openModelDirectoryButton) openModelDirectoryButton.addEventListener('click', openModelDirectory);
 if (addJournalTagButton) addJournalTagButton.addEventListener('click', addJournalTag);
 openDeleteDayButton.addEventListener('click', openDeleteDayModal);
 openResetButton.addEventListener('click', openResetModal);
@@ -376,11 +546,18 @@ saveScheduleTableButton.addEventListener('click', saveScheduleTable);
 scheduleTableModal.addEventListener('click', (event) => {
   if (event.target === scheduleTableModal) closeScheduleTableModal();
 });
-closeDailyPlanTableModalButton.addEventListener('click', closeDailyPlanTableModal);
+if (closeDailyPlanVoicePageButton) closeDailyPlanVoicePageButton.addEventListener('click', closeDailyPlanTableModal);
+if (openDailyPlanVoicePageButton) openDailyPlanVoicePageButton.addEventListener('click', openDailyPlanVoicePage);
+if (backDailyPlanVoicePageButton) backDailyPlanVoicePageButton.addEventListener('click', closeDailyPlanVoicePage);
 cancelDailyPlanTableButton.addEventListener('click', closeDailyPlanTableModal);
 addDailyPlanRowButton.addEventListener('click', () => addDailyPlanRow());
 saveDailyPlanTableButton.addEventListener('click', saveDailyPlanTable);
-if (dailyPlanSingleDay) dailyPlanSingleDay.addEventListener('change', syncDailyPlanDateMode);
+if (dailyPlanVoiceStartButton) dailyPlanVoiceStartButton.addEventListener('click', toggleDailyPlanVoiceInput);
+if (dailyPlanVoiceCancelButton) dailyPlanVoiceCancelButton.addEventListener('click', cancelDailyPlanVoiceInput);
+if (dailyPlanVoiceConfirmButton) dailyPlanVoiceConfirmButton.addEventListener('click', confirmDailyPlanVoiceText);
+if (dailyPlanVoiceApplyButton) dailyPlanVoiceApplyButton.addEventListener('click', applyDailyPlanVoiceTasks);
+if (dailyPlanVoiceText) dailyPlanVoiceText.addEventListener('input', invalidateDailyPlanVoiceParse);
+if (dailyPlanMultiDay) dailyPlanMultiDay.addEventListener('change', handleDailyPlanDateModeChange);
 if (dailyPlanStartDate) dailyPlanStartDate.addEventListener('change', constrainDailyPlanEndDate);
 if (dailyPlanEndDate) dailyPlanEndDate.addEventListener('change', constrainDailyPlanEndDate);
 dailyPlanTableModal.addEventListener('click', (event) => {
@@ -395,14 +572,1031 @@ journalViewModal.addEventListener('click', (event) => {
   input.addEventListener('change', saveProfileFromForm);
 });
 
+function getSelectedAudioInputDeviceId() {
+  return asrInputDeviceSelect ? asrInputDeviceSelect.value : '';
+}
+
+async function refreshAudioInputDevices() {
+  if (!asrInputDeviceSelect || !window.RizhiAsrAudioCapture) return;
+  const previousDeviceId = asrInputDeviceSelect.value;
+  asrRefreshDevicesButton.disabled = true;
+  try {
+    const devices = await window.RizhiAsrAudioCapture.getAudioInputDevices();
+    asrInputDeviceSelect.replaceChildren();
+    if (!devices.length) {
+      const option = new Option('未发现可用麦克风', '');
+      asrInputDeviceSelect.add(option);
+      asrInputDeviceSelect.disabled = true;
+      return;
+    }
+
+    devices.forEach((device, index) => {
+      const label = device.label || `语音输入设备 ${index + 1}（授权后显示名称）`;
+      asrInputDeviceSelect.add(new Option(label, device.deviceId));
+    });
+    asrInputDeviceSelect.disabled = false;
+    const matchingDevice = devices.some((device) => device.deviceId === previousDeviceId);
+    asrInputDeviceSelect.value = matchingDevice ? previousDeviceId : devices[0].deviceId;
+  } catch (error) {
+    asrInputDeviceSelect.replaceChildren(new Option('无法读取语音输入设备', ''));
+    asrInputDeviceSelect.disabled = true;
+    setInputFeedback(`无法读取设备：${error.message || String(error)}`, 'warning');
+  } finally {
+    asrRefreshDevicesButton.disabled = microphoneTestRecording || asrTestRecording;
+  }
+}
+
+async function startMicrophoneTest() {
+  if (microphoneTestRecording) return;
+  if (journalVoiceRecording || dailyPlanVoiceRecording) {
+    setInputFeedback('请先停止正在进行的语音输入，再开始麦克风测试。', 'warning');
+    return;
+  }
+  if (asrTestRecording) {
+    setInputFeedback('请先停止语音识别录音，再开始麦克风测试。', 'warning');
+    return;
+  }
+
+  setMicrophoneTestControls(true);
+  clearInputWaveform();
+  setInputFeedback('正在请求麦克风权限…');
+  try {
+    await ensureMicrophoneTestCapture();
+    const captureResult = await microphoneTestCapture.start();
+    microphoneTestRecording = true;
+    lastMicrophoneSoundAt = Date.now();
+    setMicrophoneTestControls(true);
+    setInputFeedback(`正在测试：输入 ${captureResult.inputSampleRate} Hz，波形已重采样至 ${captureResult.sampleRate} Hz。`, 'warning');
+    startMicrophoneSilenceWatch();
+    await refreshAudioInputDevices();
+    setMicrophoneTestControls(true);
+  } catch (error) {
+    microphoneTestRecording = false;
+    setMicrophoneTestControls(false);
+    setInputFeedback(describeMicrophoneError(error), 'warning');
+  }
+}
+
+async function stopMicrophoneTest() {
+  if (!microphoneTestRecording) return;
+  setMicrophoneTestControls(true, true);
+  try {
+    await microphoneTestCapture.stop();
+    setInputFeedback('麦克风测试已停止。未保存或发送任何音频。');
+  } catch (error) {
+    setInputFeedback(describeMicrophoneError(error), 'warning');
+  } finally {
+    microphoneTestRecording = false;
+    stopMicrophoneSilenceWatch();
+    setMicrophoneTestControls(false);
+  }
+}
+
+async function ensureMicrophoneTestCapture() {
+  if (!window.RizhiAsrAudioCapture || !window.RizhiAsrAudioCapture.AudioCapture) {
+    throw new Error('未能加载 AudioWorklet 麦克风采集模块。');
+  }
+  const deviceId = getSelectedAudioInputDeviceId();
+  if (!microphoneTestCapture) {
+    // This test does not invoke ASR, so it uses a neutral browser-audio target
+    // rather than duplicating the model sample-rate configuration in renderer.
+    microphoneTestCapture = new window.RizhiAsrAudioCapture.AudioCapture({
+      sampleRate: MICROPHONE_TEST_SAMPLE_RATE,
+      deviceId
+    });
+    microphoneTestUnsubscribe = microphoneTestCapture.onAudioFrame((frame) => {
+      if (frame.error) {
+        setInputFeedback(describeMicrophoneError(frame.error), 'warning');
+        return;
+      }
+      drawInputWaveform(frame.samples);
+      const level = calculateRms(frame.samples);
+      if (level >= 0.012) {
+        lastMicrophoneSoundAt = Date.now();
+        setInputFeedback('麦克风工作正常，正在接收声音。', 'active');
+      }
+    });
+  } else {
+    microphoneTestCapture.setDeviceId(deviceId);
+  }
+  await microphoneTestCapture.initialize();
+}
+
+function calculateRms(samples) {
+  if (!samples || !samples.length) return 0;
+  let total = 0;
+  for (let index = 0; index < samples.length; index += 1) total += samples[index] * samples[index];
+  return Math.sqrt(total / samples.length);
+}
+
+function drawInputWaveform(samples) {
+  if (!asrInputWaveform) return;
+  const rect = asrInputWaveform.getBoundingClientRect();
+  const ratio = window.devicePixelRatio || 1;
+  const width = Math.max(1, Math.round(rect.width * ratio));
+  const height = Math.max(1, Math.round(rect.height * ratio));
+  if (asrInputWaveform.width !== width || asrInputWaveform.height !== height) {
+    asrInputWaveform.width = width;
+    asrInputWaveform.height = height;
+  }
+
+  const context = asrInputWaveform.getContext('2d');
+  context.clearRect(0, 0, width, height);
+  context.fillStyle = '#ffffff';
+  context.fillRect(0, 0, width, height);
+  context.strokeStyle = '#dbe2e8';
+  context.lineWidth = ratio;
+  context.beginPath();
+  context.moveTo(0, height / 2);
+  context.lineTo(width, height / 2);
+  context.stroke();
+
+  context.strokeStyle = '#21865e';
+  context.lineWidth = Math.max(1, ratio * 1.5);
+  context.beginPath();
+  const step = Math.max(1, Math.ceil(samples.length / width));
+  for (let x = 0, sampleIndex = 0; x < width; x += 1, sampleIndex += step) {
+    const sample = samples[Math.min(sampleIndex, samples.length - 1)] || 0;
+    const y = height / 2 - sample * height * 0.42;
+    if (x === 0) context.moveTo(x, y);
+    else context.lineTo(x, y);
+  }
+  context.stroke();
+}
+
+function clearInputWaveform() {
+  if (!asrInputWaveform) return;
+  const context = asrInputWaveform.getContext('2d');
+  if (!context) return;
+  const rect = asrInputWaveform.getBoundingClientRect();
+  const ratio = window.devicePixelRatio || 1;
+  asrInputWaveform.width = Math.max(1, Math.round(rect.width * ratio));
+  asrInputWaveform.height = Math.max(1, Math.round(rect.height * ratio));
+  context.fillStyle = '#ffffff';
+  context.fillRect(0, 0, asrInputWaveform.width, asrInputWaveform.height);
+  context.strokeStyle = '#dbe2e8';
+  context.beginPath();
+  context.moveTo(0, asrInputWaveform.height / 2);
+  context.lineTo(asrInputWaveform.width, asrInputWaveform.height / 2);
+  context.stroke();
+}
+
+function startMicrophoneSilenceWatch() {
+  stopMicrophoneSilenceWatch();
+  microphoneSilenceTimer = window.setInterval(() => {
+    if ((microphoneTestRecording || asrTestRecording) && Date.now() - lastMicrophoneSoundAt >= 1200) {
+      setInputFeedback('未接收到声音', 'warning');
+    }
+  }, 350);
+}
+
+function stopMicrophoneSilenceWatch() {
+  if (microphoneSilenceTimer) window.clearInterval(microphoneSilenceTimer);
+  microphoneSilenceTimer = null;
+}
+
+function startJournalVoiceSilenceWatch() {
+  stopJournalVoiceSilenceWatch();
+  journalVoiceSilenceTimer = window.setInterval(() => {
+    if (journalVoiceRecording && Date.now() - journalVoiceLastSoundAt >= 1200) {
+      setJournalVoiceStatus('未检测到声音输入。请检查麦克风或开始说话。', 'warning');
+    }
+  }, 350);
+}
+
+function stopJournalVoiceSilenceWatch() {
+  if (journalVoiceSilenceTimer) window.clearInterval(journalVoiceSilenceTimer);
+  journalVoiceSilenceTimer = null;
+}
+
+function startJournalVoiceDurationTimers(maxDurationSeconds) {
+  stopJournalVoiceDurationTimers();
+  const timers = scheduleVoiceDurationTimers(maxDurationSeconds, {
+    isRecording: () => journalVoiceRecording,
+    onWarning: () => {
+      setJournalVoiceStatus('还有 10 秒录制时间，请准备结束本段录音。', 'warning');
+      playJournalVoiceWarningTone(journalVoiceCapture);
+    },
+    onMaximum: () => void stopJournalVoiceInput({ automatic: true })
+  });
+  journalVoiceWarningTimer = timers.warningTimer;
+  journalVoiceMaximumTimer = timers.maximumTimer;
+}
+
+function scheduleVoiceDurationTimers(maxDurationSeconds, handlers) {
+  const maxSeconds = Math.max(1, Number(maxDurationSeconds) || 90);
+  const warningDelayMs = Math.max(0, (maxSeconds - 10) * 1000);
+  const warningTimer = window.setTimeout(() => {
+    if (!handlers || typeof handlers.isRecording !== 'function' || !handlers.isRecording()) return;
+    if (typeof handlers.onWarning === 'function') handlers.onWarning();
+  }, warningDelayMs);
+  const maximumTimer = window.setTimeout(() => {
+    if (!handlers || typeof handlers.isRecording !== 'function' || !handlers.isRecording()) return;
+    if (typeof handlers.onMaximum === 'function') handlers.onMaximum();
+  }, maxSeconds * 1000);
+  return { warningTimer, maximumTimer };
+}
+
+function stopJournalVoiceDurationTimers() {
+  if (journalVoiceWarningTimer) window.clearTimeout(journalVoiceWarningTimer);
+  if (journalVoiceMaximumTimer) window.clearTimeout(journalVoiceMaximumTimer);
+  journalVoiceWarningTimer = null;
+  journalVoiceMaximumTimer = null;
+}
+
+function formatVoiceDuration(totalSeconds) {
+  const seconds = Math.max(0, Math.ceil(Number(totalSeconds) || 0));
+  return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
+function setJournalVoiceTimer(text, hidden = false) {
+  if (!journalVoiceTimer) return;
+  journalVoiceTimer.textContent = text;
+  journalVoiceTimer.classList.toggle('hidden', hidden);
+}
+
+function clearJournalVoiceTimer({ hide = false } = {}) {
+  if (journalVoiceTimerInterval) window.clearInterval(journalVoiceTimerInterval);
+  journalVoiceTimerInterval = null;
+  if (hide) setJournalVoiceTimer('', true);
+}
+
+function startJournalVoiceRecordingTimer(maxDurationSeconds) {
+  clearJournalVoiceTimer({ hide: true });
+  journalVoiceRecordingStartedAt = Date.now();
+  const maxSeconds = Math.max(1, Number(maxDurationSeconds) || 90);
+  const render = () => {
+    const elapsed = (Date.now() - journalVoiceRecordingStartedAt) / 1000;
+    setJournalVoiceTimer(
+      `录音 ${formatVoiceDuration(elapsed)} / ${formatVoiceDuration(maxSeconds)}（剩余 ${formatVoiceDuration(maxSeconds - elapsed)}）`
+    );
+  };
+  render();
+  journalVoiceTimerInterval = window.setInterval(render, 250);
+}
+
+function startJournalVoiceConversionTimer() {
+  clearJournalVoiceTimer();
+  journalVoiceConversionStartedAt = Date.now();
+  const pendingAudioSeconds = Math.max(0.5, journalVoiceCapturedSeconds - journalVoiceDecodedSeconds);
+  // The estimate uses actual speed from already decoded VAD segments. A
+  // conservative fallback is used for the first segment of a fresh session.
+  const realtimeFactor = journalVoiceDecodeRealtimeFactor || 1.2;
+  const estimatedSeconds = Math.max(1, Math.ceil(pendingAudioSeconds * realtimeFactor));
+  const render = () => {
+    const elapsed = (Date.now() - journalVoiceConversionStartedAt) / 1000;
+    const remaining = estimatedSeconds - elapsed;
+    const suffix = remaining > 0
+      ? `预计剩余 ${formatVoiceDuration(remaining)}`
+      : '正在完成最后一段';
+    setJournalVoiceTimer(`转换 ${formatVoiceDuration(elapsed)}（${suffix}）`);
+  };
+  render();
+  journalVoiceTimerInterval = window.setInterval(render, 250);
+}
+
+function finishJournalVoiceConversionTimer() {
+  if (!journalVoiceConversionStartedAt) return;
+  const elapsed = (Date.now() - journalVoiceConversionStartedAt) / 1000;
+  clearJournalVoiceTimer();
+  setJournalVoiceTimer(`转换完成，耗时 ${formatVoiceDuration(elapsed)}`);
+  journalVoiceConversionStartedAt = 0;
+}
+
+function updateJournalVoiceDecodeEstimate(payload) {
+  const segmentSeconds = Number(payload && payload.segmentDurationSeconds);
+  const decodeMilliseconds = Number(payload && payload.decodeElapsedMs);
+  if (!(segmentSeconds > 0) || !(decodeMilliseconds >= 0)) return;
+  journalVoiceDecodedSeconds += segmentSeconds;
+  const observedFactor = decodeMilliseconds / (segmentSeconds * 1000);
+  journalVoiceDecodeRealtimeFactor = journalVoiceDecodeRealtimeFactor > 0
+    ? journalVoiceDecodeRealtimeFactor * 0.7 + observedFactor * 0.3
+    : observedFactor;
+}
+
+function playJournalVoiceWarningTone(audioCapture = journalVoiceCapture) {
+  const audioContext = audioCapture && audioCapture.audioContext;
+  if (!audioContext || audioContext.state === 'closed') return;
+  try {
+    if (audioContext.state === 'suspended') void audioContext.resume();
+    const startAt = audioContext.currentTime + 0.02;
+    [0, 0.18].forEach((offset) => {
+      const oscillator = audioContext.createOscillator();
+      const gain = audioContext.createGain();
+      oscillator.type = 'sine';
+      oscillator.frequency.value = 880;
+      gain.gain.setValueAtTime(0.0001, startAt + offset);
+      gain.gain.exponentialRampToValueAtTime(0.16, startAt + offset + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, startAt + offset + 0.13);
+      oscillator.connect(gain);
+      gain.connect(audioContext.destination);
+      oscillator.start(startAt + offset);
+      oscillator.stop(startAt + offset + 0.14);
+    });
+  } catch (error) {
+    // The visible 10-second warning remains available if the system blocks sound.
+  }
+}
+
+function setMicrophoneTestControls(recording, stopping = false) {
+  if (asrMicTestStartButton) asrMicTestStartButton.disabled = recording;
+  if (asrMicTestStopButton) asrMicTestStopButton.disabled = !recording || stopping;
+  setInputDeviceControlsDisabled(recording);
+}
+
+function setInputDeviceControlsDisabled(disabled) {
+  if (asrInputDeviceSelect) asrInputDeviceSelect.disabled = disabled;
+  if (asrRefreshDevicesButton) asrRefreshDevicesButton.disabled = disabled;
+}
+
+function setInputFeedback(message, state = '') {
+  if (!asrInputFeedback) return;
+  asrInputFeedback.textContent = message;
+  asrInputFeedback.classList.toggle('is-active', state === 'active');
+  asrInputFeedback.classList.toggle('is-warning', state === 'warning');
+}
+
+function describeMicrophoneError(error) {
+  if (error && error.code === 'MIC_PERMISSION_DENIED') return `麦克风权限被拒绝：${error.message}`;
+  if (error && error.code === 'MIC_DEVICE_NOT_FOUND') return `未找到语音输入设备：${error.message}`;
+  return `麦克风测试失败：${error && error.message ? error.message : String(error)}`;
+}
+
+async function toggleJournalVoiceInput() {
+  if (journalVoiceRecording) {
+    await stopJournalVoiceInput();
+    return;
+  }
+  await startJournalVoiceInput();
+}
+
+async function startJournalVoiceInput() {
+  if (asrTestRecording || microphoneTestRecording || dailyPlanVoiceRecording) {
+    setJournalVoiceStatus('请先停止设置页正在进行的音频操作。', true);
+    return;
+  }
+
+  journalVoiceCanceled = false;
+  journalVoiceProcessing = false;
+  journalVoiceFinalInserted = false;
+  journalVoiceHasInsertedSegment = false;
+  journalVoiceOriginalContent = journalContent.value;
+  journalVoiceCapturedSeconds = 0;
+  journalVoiceDecodedSeconds = 0;
+  journalVoiceDecodeRealtimeFactor = 0;
+  journalVoiceConversionStartedAt = 0;
+  clearJournalVoiceTimer({ hide: true });
+  journalVoiceInsertionPoint = Number.isInteger(journalLastCursorPosition)
+    ? journalLastCursorPosition
+    : journalContent.value.length;
+  journalVoiceOriginalInsertionPoint = journalVoiceInsertionPoint;
+  setJournalVoiceControls('starting');
+  setJournalVoiceStatus('正在加载本地语音识别器…');
+
+  let serviceStarted = false;
+  try {
+    const api = getAsrTestApi();
+    const initialization = await initializeAsrForUse(api);
+    await ensureJournalVoiceCapture(initialization.sampleRate, api);
+    const startResult = await api.start();
+    ensureAsrSuccess(startResult);
+    serviceStarted = true;
+
+    await journalVoiceCapture.start();
+    journalVoiceRecording = true;
+    journalVoiceLastSoundAt = Date.now();
+    startJournalVoiceSilenceWatch();
+    startJournalVoiceDurationTimers(startResult.maxRecordingDurationSeconds || 90);
+    startJournalVoiceRecordingTimer(startResult.maxRecordingDurationSeconds || 90);
+    setJournalVoiceControls('recording');
+    setJournalVoiceStatus(
+      `单次录音最多 ${startResult.maxRecordingDurationSeconds || 90} 秒，建议以午休为界分别录制上、下午音频。VAD 已开启。`,
+      'active'
+    );
+  } catch (error) {
+    journalVoiceCanceled = true;
+    if (serviceStarted) {
+      try {
+        await getAsrTestApi().cancel();
+      } catch (cancelError) {
+        // The original microphone/model error is more useful to the user.
+      }
+    }
+    await stopJournalVoiceCapture();
+    journalVoiceRecording = false;
+    stopJournalVoiceSilenceWatch();
+    clearJournalVoiceTimer({ hide: true });
+    resetJournalVoiceControls();
+    setJournalVoiceStatus(describeJournalVoiceError(error), true);
+  }
+}
+
+async function stopJournalVoiceInput({ automatic = false } = {}) {
+  if (!journalVoiceRecording) return;
+  // Keep journalVoiceRecording true until the Worker finishes draining the
+  // buffered frames, so its final VAD segments can still reach the textarea.
+  journalVoiceProcessing = true;
+  stopJournalVoiceSilenceWatch();
+  stopJournalVoiceDurationTimers();
+  startJournalVoiceConversionTimer();
+  setJournalVoiceControls('processing');
+  setJournalVoiceStatus('已结束本次录制，正在转成文本…');
+  try {
+    // AudioCapture.stop() immediately releases media tracks, then flushes only
+    // the already buffered PCM before the Worker performs final decoding.
+    await stopJournalVoiceCapture();
+    const result = await getAsrTestApi().stop();
+    ensureAsrSuccess(result);
+    if (!journalVoiceCanceled && !journalVoiceFinalInserted) {
+      finalizeJournalVoiceInput(result.finalText || '');
+    }
+    if (automatic) setJournalVoiceStatus('已结束本次录制，语音文本已转换并插入记录。');
+  } catch (error) {
+    clearJournalVoiceTimer({ hide: true });
+    setJournalVoiceStatus(describeJournalVoiceError(error), true);
+  } finally {
+    journalVoiceRecording = false;
+    journalVoiceProcessing = false;
+    stopJournalVoiceSilenceWatch();
+    stopJournalVoiceDurationTimers();
+    resetJournalVoiceControls();
+  }
+}
+
+async function cancelJournalVoiceInput() {
+  if (!journalVoiceRecording) return;
+  journalVoiceCanceled = true;
+  journalVoiceProcessing = true;
+  clearJournalVoiceTimer({ hide: true });
+  setJournalVoiceControls('processing');
+  setJournalVoiceStatus('正在取消本次语音输入…');
+  try {
+    await stopJournalVoiceCapture();
+    const result = await getAsrTestApi().cancel();
+    ensureAsrSuccess(result);
+    journalContent.value = journalVoiceOriginalContent;
+    const restorePosition = Math.max(
+      0,
+      Math.min(journalVoiceOriginalInsertionPoint || 0, journalContent.value.length)
+    );
+    journalContent.focus();
+    journalContent.setSelectionRange(restorePosition, restorePosition);
+    journalLastCursorPosition = restorePosition;
+    setJournalVoiceStatus('已取消本次语音输入，未写入记录。');
+  } catch (error) {
+    setJournalVoiceStatus(describeJournalVoiceError(error), true);
+  } finally {
+    journalVoiceRecording = false;
+    journalVoiceProcessing = false;
+    stopJournalVoiceSilenceWatch();
+    stopJournalVoiceDurationTimers();
+    resetJournalVoiceControls();
+  }
+}
+
+async function ensureJournalVoiceCapture(sampleRate, api) {
+  if (!window.RizhiAsrAudioCapture || !window.RizhiAsrAudioCapture.AudioCapture) {
+    throw new Error('未能加载本地音频采集模块。');
+  }
+  if (journalVoiceCapture && journalVoiceCapture.sampleRate !== sampleRate) {
+    await journalVoiceCapture.dispose();
+    journalVoiceCapture = null;
+  }
+  if (!journalVoiceCapture) {
+    journalVoiceCapture = new window.RizhiAsrAudioCapture.AudioCapture({
+      sampleRate,
+      deviceId: getSelectedAudioInputDeviceId()
+    });
+    journalVoiceCaptureUnsubscribe = journalVoiceCapture.onAudioFrame((frame) => {
+      if (frame.error) {
+        setJournalVoiceStatus(describeJournalVoiceError(frame.error), true);
+        return;
+      }
+      if (calculateRms(frame.samples) >= 0.012) {
+        journalVoiceLastSoundAt = Date.now();
+      }
+      journalVoiceCapturedSeconds += frame.samples.length / frame.sampleRate;
+      try {
+        api.sendAudioFrame(frame.sampleRate, frame.samples);
+      } catch (error) {
+        setJournalVoiceStatus(describeJournalVoiceError(error), true);
+      }
+    });
+  } else {
+    journalVoiceCapture.setDeviceId(getSelectedAudioInputDeviceId());
+  }
+  await journalVoiceCapture.initialize();
+}
+
+async function stopJournalVoiceCapture() {
+  if (journalVoiceCapture) await journalVoiceCapture.stop();
+}
+
+function insertJournalVoiceSegmentText(value) {
+  if (journalVoiceCanceled) return false;
+  const segmentText = clean(value);
+  if (!segmentText) return false;
+  const currentValue = journalContent.value;
+  const rawPosition = Number.isInteger(journalVoiceInsertionPoint)
+    ? journalVoiceInsertionPoint
+    : currentValue.length;
+  const position = Math.max(0, Math.min(rawPosition, currentValue.length));
+  const before = currentValue.slice(0, position);
+  const after = currentValue.slice(position);
+  const insertedText = segmentText;
+  journalContent.value = `${before}${insertedText}${after}`;
+  const caretPosition = position + insertedText.length;
+  journalContent.focus();
+  journalContent.setSelectionRange(caretPosition, caretPosition);
+  journalLastCursorPosition = caretPosition;
+  journalVoiceInsertionPoint = caretPosition;
+  journalVoiceHasInsertedSegment = true;
+  journalSaveState.textContent = '已插入语音文本，尚未保存';
+  return true;
+}
+
+function finalizeJournalVoiceInput(value) {
+  if (journalVoiceCanceled || journalVoiceFinalInserted) return;
+  journalVoiceFinalInserted = true;
+  if (!journalVoiceHasInsertedSegment) insertJournalVoiceSegmentText(value);
+  if (journalVoiceProcessing) finishJournalVoiceConversionTimer();
+  setJournalVoiceStatus(
+    journalVoiceHasInsertedSegment
+      ? '语音段已直接插入记录。请按“保存记录”写入本地数据。'
+      : '未识别到清晰语音，未修改记录。'
+  );
+}
+
+function rememberJournalCursorPosition() {
+  if (Number.isInteger(journalContent.selectionStart)) {
+    journalLastCursorPosition = journalContent.selectionStart;
+  }
+}
+
+function setJournalVoiceControls(state) {
+  if (!journalVoiceStartButton || !journalVoiceCancelButton) return;
+  if (state === 'recording') {
+    journalVoiceStartButton.disabled = false;
+    journalVoiceStartButton.textContent = '● 正在聆听，点击停止';
+    journalVoiceCancelButton.classList.remove('hidden');
+    journalVoiceCancelButton.disabled = false;
+    return;
+  }
+  if (state === 'starting' || state === 'processing') {
+    journalVoiceStartButton.disabled = true;
+    journalVoiceStartButton.textContent = state === 'processing' ? '正在识别…' : '正在准备…';
+    journalVoiceCancelButton.classList.toggle('hidden', state === 'starting');
+    journalVoiceCancelButton.disabled = true;
+    return;
+  }
+  resetJournalVoiceControls();
+}
+
+function resetJournalVoiceControls() {
+  if (!journalVoiceStartButton || !journalVoiceCancelButton) return;
+  journalVoiceStartButton.disabled = false;
+  journalVoiceStartButton.textContent = '🎤 语音输入';
+  journalVoiceCancelButton.disabled = false;
+  journalVoiceCancelButton.classList.add('hidden');
+}
+
+function setJournalVoiceStatus(message, state = '') {
+  if (!journalVoiceStatus) return;
+  journalVoiceStatus.textContent = message;
+  const normalizedState = state === true ? 'error' : state;
+  journalVoiceStatus.classList.toggle('is-error', normalizedState === 'error');
+  journalVoiceStatus.classList.toggle('is-active', normalizedState === 'active');
+  journalVoiceStatus.classList.toggle('is-warning', normalizedState === 'warning');
+}
+
+function describeJournalVoiceError(error) {
+  if (error && error.code === 'ASR_MODEL_DOWNLOADING') return '模型正在下载中，请稍后使用。';
+  if (error && error.code === 'ASR_MODEL_DOWNLOAD_CANCELED') return '已取消模型下载。需要时可再次点击“语音输入”。';
+  if (error && error.code === 'MIC_PERMISSION_DENIED') return `无法开始语音输入：${error.message}`;
+  if (error && error.code === 'MIC_DEVICE_NOT_FOUND') return `无法开始语音输入：${error.message}`;
+  return `语音输入失败：${error && error.message ? error.message : String(error)}`;
+}
+
+function getAsrTestApi() {
+  const api = window.whbr && window.whbr.asr;
+  if (!api) throw new Error('ASR IPC 接口不可用。请重新启动应用后重试。');
+  return api;
+}
+
+function formatAsrModelSize(bytes) {
+  const value = Number(bytes || 0);
+  if (!Number.isFinite(value) || value <= 0) return '较大的模型文件';
+  return `${Math.round((value / 1024 / 1024) * 10) / 10} MB`;
+}
+
+function updateAsrModelStatus(status = {}) {
+  latestAsrModelStatus = status;
+  if (status.downloadDirectory) {
+    asrModelDownloadDirectory = status.downloadDirectory;
+    updateStoragePathView();
+  }
+  if (!asrModelStatus) return;
+  const state = status.state || 'not-installed';
+  const progress = status.progress || {};
+  const downloadSize = formatAsrModelSize(status.downloadSizeBytes);
+  let message = '未安装。首次使用需要下载离线语音模型。';
+  if (state === 'downloading') {
+    message = '正在下载模型；进度显示在“设置”标题右侧。';
+  } else if (state === 'installed') {
+    message = status.source === 'development'
+      ? '已安装（正在使用开发模型目录）。'
+      : '已安装，可离线使用。';
+  } else if (state === 'failed') {
+    message = `下载失败：${status.error && status.error.message ? status.error.message : '请检查网络后重试。'}`;
+  } else {
+    message = `未安装。首次下载约 ${downloadSize}，完成后即可离线使用。`;
+  }
+  asrModelStatus.textContent = message;
+  asrModelStatus.classList.toggle('is-ready', state === 'installed');
+  asrModelStatus.classList.toggle('is-error', state === 'failed');
+  updateSettingsAsrDownloadProgress(status);
+
+  if (!asrModelDownloadButton) return;
+  const canDownload = status.canDownload !== false;
+  asrModelDownloadButton.classList.toggle('hidden', state === 'installed' || !canDownload);
+  asrModelDownloadButton.disabled = state === 'downloading' || !canDownload;
+  asrModelDownloadButton.textContent = state === 'failed' ? '重试下载' : '下载模型';
+}
+
+function updateSettingsAsrDownloadProgress(status = latestAsrModelStatus) {
+  if (!settingsAsrDownloadProgress) return;
+  const isDownloading = status && status.state === 'downloading' && currentPageKey() === 'settings';
+  settingsAsrDownloadProgress.classList.toggle('hidden', !isDownloading);
+  if (!isDownloading) return;
+  const progress = status.progress || {};
+  if (progress.phase === 'extracting') settingsAsrDownloadProgress.textContent = '正在解压语音模型…';
+  else if (progress.phase === 'verifying') settingsAsrDownloadProgress.textContent = '正在校验语音模型…';
+  else if (Number.isFinite(progress.percent)) settingsAsrDownloadProgress.textContent = `正在下载模型 ${progress.percent}%`;
+  else settingsAsrDownloadProgress.textContent = '正在准备模型下载…';
+}
+
+async function refreshAsrModelStatus() {
+  try {
+    const result = await getAsrTestApi().getModelStatus();
+    updateAsrModelStatus(ensureAsrSuccess(result));
+    return result;
+  } catch (error) {
+    updateAsrModelStatus({ state: 'failed', error: { message: error.message || String(error) } });
+    return null;
+  }
+}
+
+async function confirmAndDownloadAsrModel(api) {
+  let status = ensureAsrSuccess(await api.getModelStatus());
+  updateAsrModelStatus(status);
+  if (status.isReady) return status;
+  if (status.state === 'downloading' || asrModelDownloadInFlight) {
+    const error = new Error('模型正在下载中，请稍后使用。');
+    error.code = 'ASR_MODEL_DOWNLOADING';
+    throw error;
+  }
+  if (status.canDownload === false) {
+    const error = new Error('开发模型目录不完整。请检查开发模型配置。');
+    error.code = 'ASR_MODEL_NOT_READY';
+    throw error;
+  }
+
+  while (!status.isReady) {
+    const size = formatAsrModelSize(status.downloadSizeBytes);
+    const response = await window.whbr.showMessageBox({
+      type: status.state === 'failed' ? 'error' : 'question',
+      title: '下载离线语音模型',
+      message: status.state === 'failed'
+        ? '离线语音模型下载失败。'
+        : `首次使用离线语音输入，需要下载语音识别模型（约 ${size}）。`,
+      detail: status.state === 'failed'
+        ? `${status.error && status.error.message ? status.error.message : '请检查网络连接后重试。'}\n模型下载完成后即可离线使用。`
+        : '模型下载完成后即可离线使用。下载仅来自 sherpa-onnx 官方发布页。',
+      buttons: [status.state === 'failed' ? '重试下载' : '下载模型', '取消'],
+      defaultId: 0,
+      cancelId: 1
+    });
+    if (!response || response.response !== 0) {
+      const error = new Error('已取消下载离线语音模型。');
+      error.code = 'ASR_MODEL_DOWNLOAD_CANCELED';
+      throw error;
+    }
+
+    try {
+      asrModelDownloadInFlight = true;
+      updateAsrModelStatus({ ...status, state: 'downloading', progress: { phase: 'preparing', percent: 0 } });
+      status = ensureAsrSuccess(await api.downloadModel());
+      updateAsrModelStatus(status);
+    } catch (error) {
+      status = ensureAsrSuccess(await api.getModelStatus());
+      updateAsrModelStatus(status);
+      if (status.state !== 'failed') throw error;
+    } finally {
+      asrModelDownloadInFlight = false;
+    }
+  }
+  return status;
+}
+
+async function initializeAsrForUse(api) {
+  await confirmAndDownloadAsrModel(api);
+  return ensureAsrSuccess(await api.initialize());
+}
+
+async function downloadAsrModelFromSettings() {
+  if (asrModelDownloadInFlight) return;
+  try {
+    await confirmAndDownloadAsrModel(getAsrTestApi());
+  } catch (error) {
+    if (error && error.code === 'ASR_MODEL_DOWNLOAD_CANCELED') return;
+    updateAsrModelStatus({ state: 'failed', error: { message: error.message || String(error) } });
+  }
+}
+
+async function openModelDirectory() {
+  try {
+    const result = ensureAsrSuccess(await getAsrTestApi().openModelDirectory());
+    if (result.error) setStatus(`打开模型文件夹失败：${result.error}`, 'error', 3000);
+  } catch (error) {
+    setStatus(`打开模型文件夹失败：${error.message || String(error)}`, 'error', 3000);
+  }
+}
+
+function subscribeToAsrTestEvents() {
+  if (!window.whbr || !window.whbr.asr) return;
+  window.whbr.asr.onModelStatus((payload) => updateAsrModelStatus(payload));
+  window.whbr.asr.onPartialResult((payload) => {
+    if (asrTestRecording && asrPartialResult) {
+      asrPartialResult.textContent = payload.text || '正在分析语音…';
+      setAsrTestStatus('正在录音；已更新部分识别结果。');
+    }
+    if (journalVoiceRecording && !journalVoiceCanceled) {
+      updateJournalVoiceDecodeEstimate(payload);
+      if (insertJournalVoiceSegmentText(payload.segmentText || '') && !journalVoiceProcessing) {
+        setJournalVoiceStatus('VAD 已完成一段语音，文本已直接插入。继续说话或点击停止。', 'active');
+      }
+    }
+    if (dailyPlanVoiceRecording && !dailyPlanVoiceCanceled) {
+      updateDailyPlanVoiceDecodeEstimate(payload);
+      if (!dailyPlanVoiceProcessing && !dailyPlanVoiceWarningActive) {
+        setDailyPlanVoiceStatus('已接收一段语音，停止录音后将显示完整原始文字。');
+      }
+    }
+  });
+  window.whbr.asr.onFinalResult((payload) => {
+    if (asrTestRecording && asrFinalResult) {
+      asrFinalResult.textContent = payload.text || '未识别到清晰语音。';
+      setAsrTestStatus('识别完成。最终文本已显示。');
+    }
+    if (journalVoiceRecording && !journalVoiceCanceled) {
+      finalizeJournalVoiceInput(payload.text || '');
+    }
+    if (dailyPlanVoiceRecording && !dailyPlanVoiceCanceled && dailyPlanVoiceText) {
+      dailyPlanVoiceText.value = payload.text || '';
+      dailyPlanVoiceFinalReceived = true;
+      if (dailyPlanVoiceProcessing) finishDailyPlanVoiceConversionTimer();
+      setDailyPlanVoiceStatus('识别完成。请检查并编辑原始文字，确认解析后点击“创建任务”保存。');
+    }
+  });
+  window.whbr.asr.onVadState((payload) => {
+    if (journalVoiceRecording && !journalVoiceCanceled && !journalVoiceProcessing && payload.detected) {
+      setJournalVoiceStatus('VAD 已检测到语音，正在等待停顿后识别…', 'active');
+    }
+  });
+  window.whbr.asr.onRecordingLimit(() => {
+    if (asrTestRecording) {
+      asrTestRecording = false;
+      stopMicrophoneSilenceWatch();
+      setAsrTestControls(false);
+      setInputDeviceControlsDisabled(false);
+      if (asrTestCapture) void asrTestCapture.stop().catch(() => {});
+      setAsrTestStatus('已结束录制，正在显示已识别的文本。');
+    }
+    if (journalVoiceRecording) {
+      // The worker has already emitted its final aggregated text. Stop the
+      // renderer capture promptly so the microphone indicator turns off.
+      void stopJournalVoiceCapture();
+      journalVoiceRecording = false;
+      journalVoiceProcessing = false;
+      stopJournalVoiceSilenceWatch();
+      stopJournalVoiceDurationTimers();
+      clearJournalVoiceTimer();
+      setJournalVoiceTimer('录音已自动结束，文本转换完成。');
+      resetJournalVoiceControls();
+      setJournalVoiceStatus('已结束录制，语音文本已转换并插入记录。');
+    }
+    if (dailyPlanVoiceRecording && !dailyPlanVoiceProcessing) {
+      void stopDailyPlanVoiceCapture();
+      dailyPlanVoiceRecording = false;
+      dailyPlanVoiceProcessing = false;
+      stopDailyPlanVoiceDurationTimers();
+      clearDailyPlanVoiceTimer();
+      setDailyPlanVoiceTimer('录音已自动结束，文本转换完成。');
+      setDailyPlanVoiceControls('idle');
+      setDailyPlanVoiceStatus('已结束录制，识别文字已显示。请检查并编辑。');
+    }
+  });
+  window.whbr.asr.onError((payload) => {
+    if (asrTestRecording) {
+      setAsrTestStatus(`语音识别失败：${payload.message || '未知错误。'}`, true);
+      setAsrTestControls(false);
+      setInputDeviceControlsDisabled(false);
+      asrTestRecording = false;
+      stopMicrophoneSilenceWatch();
+      if (asrTestCapture) void asrTestCapture.stop().catch(() => {});
+    }
+    if (journalVoiceRecording) {
+      journalVoiceCanceled = true;
+      void stopJournalVoiceCapture();
+      journalVoiceRecording = false;
+      journalVoiceProcessing = false;
+      stopJournalVoiceSilenceWatch();
+      stopJournalVoiceDurationTimers();
+      clearJournalVoiceTimer({ hide: true });
+      setJournalVoiceStatus(`语音输入失败：${payload.message || '未知错误。'}`, true);
+      resetJournalVoiceControls();
+    }
+    if (dailyPlanVoiceRecording) {
+      dailyPlanVoiceCanceled = true;
+      void stopDailyPlanVoiceCapture();
+      dailyPlanVoiceRecording = false;
+      setDailyPlanVoiceControls('idle');
+      dailyPlanVoiceProcessing = false;
+      stopDailyPlanVoiceDurationTimers();
+      clearDailyPlanVoiceTimer({ hide: true });
+      setDailyPlanVoiceStatus(`语音创建任务失败：${payload.message || '未知错误。'}`, true);
+    }
+  });
+}
+
+async function startRecording() {
+  if (asrTestRecording) return;
+  if (journalVoiceRecording || dailyPlanVoiceRecording) {
+    setAsrTestStatus('请先停止正在进行的语音输入，再开始语音识别。', true);
+    return;
+  }
+  if (microphoneTestRecording) {
+    setAsrTestStatus('请先停止麦克风测试，再开始语音识别。', true);
+    return;
+  }
+  setAsrTestControls(true);
+  setInputDeviceControlsDisabled(true);
+  if (asrPartialResult) asrPartialResult.textContent = '—';
+  if (asrFinalResult) asrFinalResult.textContent = '—';
+
+  let serviceStarted = false;
+  try {
+    const api = getAsrTestApi();
+    const modelStatus = ensureAsrSuccess(await api.getModelStatus());
+    const needsModelInstallation = !modelStatus.isReady;
+    setAsrTestStatus(needsModelInstallation
+      ? '正在下载离线语音模型。等模型安装好后再次点击“开始录音”进行测试。'
+      : '正在加载本地语音模型；首次加载可能需要一些时间…');
+    const initialization = await initializeAsrForUse(api);
+
+    if (needsModelInstallation) {
+      setAsrTestControls(false);
+      setInputDeviceControlsDisabled(false);
+      setAsrTestStatus('模型已安装。请再次点击“开始录音”进行测试。');
+      return;
+    }
+
+    await ensureAsrTestCapture(initialization.sampleRate, api);
+    setAsrTestStatus('正在准备本地识别器…');
+    const startResult = await api.start();
+    ensureAsrSuccess(startResult);
+    serviceStarted = true;
+
+    setAsrTestStatus('请允许麦克风权限，然后开始说话。');
+    const captureResult = await asrTestCapture.start();
+    asrTestRecording = true;
+    clearInputWaveform();
+    lastMicrophoneSoundAt = Date.now();
+    startMicrophoneSilenceWatch();
+    setAsrTestControls(true);
+    setAsrTestStatus(`正在录音。VAD 已开启，单次最长 ${startResult.maxRecordingDurationSeconds || 90} 秒；输入设备 ${captureResult.inputSampleRate} Hz，已重采样至 ${captureResult.sampleRate} Hz。`);
+    setInputFeedback('正在监听语音识别输入。', 'warning');
+  } catch (error) {
+    if (serviceStarted) {
+      try {
+        await getAsrTestApi().stop();
+      } catch (stopError) {
+        // The original error gives the user the actionable cause.
+      }
+    }
+    asrTestRecording = false;
+    setAsrTestControls(false);
+    setInputDeviceControlsDisabled(false);
+    setAsrTestStatus(describeAsrTestError(error), true);
+  }
+}
+
+async function stopRecording() {
+  if (!asrTestRecording) return;
+  setAsrTestControls(true, true);
+  setAsrTestStatus('正在停止麦克风并生成最终文本…');
+  try {
+    await asrTestCapture.stop();
+    const result = await getAsrTestApi().stop();
+    ensureAsrSuccess(result);
+    if (result.finalText && asrFinalResult) asrFinalResult.textContent = result.finalText;
+    setAsrTestStatus('识别完成。最终文本已显示。');
+    setInputFeedback('语音识别录音已停止。');
+  } catch (error) {
+    setAsrTestStatus(describeAsrTestError(error), true);
+  } finally {
+    asrTestRecording = false;
+    stopMicrophoneSilenceWatch();
+    setAsrTestControls(false);
+    setInputDeviceControlsDisabled(false);
+  }
+}
+
+async function ensureAsrTestCapture(sampleRate, api) {
+  if (!window.RizhiAsrAudioCapture || !window.RizhiAsrAudioCapture.AudioCapture) {
+    throw new Error('未能加载 AudioWorklet 采集模块。');
+  }
+  if (asrTestCapture && asrTestCapture.sampleRate !== sampleRate) {
+    await asrTestCapture.dispose();
+    asrTestCapture = null;
+  }
+  if (!asrTestCapture) {
+    asrTestCapture = new window.RizhiAsrAudioCapture.AudioCapture({
+      sampleRate,
+      deviceId: getSelectedAudioInputDeviceId()
+    });
+    asrTestCaptureUnsubscribe = asrTestCapture.onAudioFrame((frame) => {
+      if (frame.error) {
+        setAsrTestStatus(describeAsrTestError(frame.error), true);
+        setInputFeedback(describeMicrophoneError(frame.error), 'warning');
+        return;
+      }
+      drawInputWaveform(frame.samples);
+      if (calculateRms(frame.samples) >= 0.012) {
+        lastMicrophoneSoundAt = Date.now();
+        if (asrTestRecording) setInputFeedback('正在接收语音识别输入。', 'active');
+      }
+      try {
+        api.sendAudioFrame(frame.sampleRate, frame.samples);
+      } catch (error) {
+        setAsrTestStatus(describeAsrTestError(error), true);
+      }
+    });
+  } else {
+    asrTestCapture.setDeviceId(getSelectedAudioInputDeviceId());
+  }
+  await asrTestCapture.initialize();
+}
+
+function ensureAsrSuccess(result) {
+  if (result && result.ok) return result;
+  const error = new Error(result && result.error && result.error.message ? result.error.message : 'ASR 请求失败。');
+  error.code = result && result.error && result.error.code ? result.error.code : 'ASR_REQUEST_FAILED';
+  throw error;
+}
+
+function describeAsrTestError(error) {
+  const message = error && error.message ? error.message : String(error || '未知错误。');
+  if (error && error.code === 'ASR_MODEL_DOWNLOADING') return '模型正在下载中，请稍后使用。';
+  if (error && error.code === 'MIC_PERMISSION_DENIED') return `无法开始录音：${message}`;
+  if (error && error.code === 'MIC_DEVICE_NOT_FOUND') return `无法开始录音：${message}`;
+  if (error && error.code === 'ASR_MODEL_DOWNLOAD_CANCELED') return '已取消模型下载。需要时可再次点击“开始录音”。';
+  return `语音识别测试失败：${message}`;
+}
+
+function setAsrTestControls(recording, stopping = false) {
+  if (!asrTestStartButton || !asrTestStopButton) return;
+  asrTestStartButton.disabled = recording;
+  asrTestStopButton.disabled = !recording || stopping;
+}
+
+function setAsrTestStatus(message, isError = false) {
+  if (!asrTestStatus) return;
+  asrTestStatus.textContent = message;
+  asrTestStatus.classList.toggle('is-error', Boolean(isError));
+}
+
 async function refreshSystemTime() {
+  const previousDate = currentEffectiveNow ? formatLocalDate(currentEffectiveNow) : '';
   const now = await getEffectiveNow();
   currentEffectiveNow = now;
+  const today = formatLocalDate(now);
   const weekday = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][now.getDay()];
   systemTime.textContent = `${formatClockDate(now)} ${weekday} ${formatClockTime(now)}`;
+  updateTaskDateAfterMidnight(previousDate, today);
   updateTaskTemporalView();
   if (pages.profile.classList.contains('active')) renderProfileStats();
   checkDueReminders(now);
+}
+
+function updateTaskDateAfterMidnight(previousDate, today) {
+  if (!previousDate || previousDate === today) return;
+  if (!pages.tasks.classList.contains('active')) return;
+  if (normalizeDate(taskDateFilter.value) !== previousDate) return;
+
+  setDateInputValue(taskDateFilter, today);
+  activePlanningDates.add(today);
+  renderTasks({ scrollToCurrent: true, forceScroll: true });
 }
 
 function openTutorialConfirmModal() {
@@ -427,8 +1621,10 @@ async function showTutorialStep() {
   if (!step) return;
 
   showPage(step.page);
+  if (step.page === 'settings' && step.settingPanel) showSettingsPanel(step.settingPanel);
   if (step.page === 'tasks') renderTasks();
   if (step.page === 'records') {
+    showRecordsView(step.recordsView || 'editor');
     renderJournalList();
     renderSelectedJournal();
   }
@@ -553,20 +1749,28 @@ function registerDateInput(input, options = {}) {
 
   const controller = {
     committed: isSelectableDate(input.value) ? normalizeDate(input.value) : '',
-    onCommit: typeof options.onCommit === 'function' ? options.onCommit : null
+    onCommit: typeof options.onCommit === 'function' ? options.onCommit : null,
+    manualEditing: false
   };
   dateInputControllers.set(input, controller);
 
+  input.addEventListener('pointerdown', () => {
+    controller.manualEditing = false;
+  });
   input.addEventListener('input', () => sanitizeDateInputValue(input));
   input.addEventListener('change', () => {
-    if (document.activeElement === input) {
+    if (document.activeElement === input && controller.manualEditing) {
       sanitizeDateInputValue(input);
       return;
     }
     commitDateInput(input);
   });
-  input.addEventListener('blur', () => commitDateInput(input));
+  input.addEventListener('blur', () => {
+    controller.manualEditing = false;
+    commitDateInput(input);
+  });
   input.addEventListener('keydown', (event) => {
+    controller.manualEditing = true;
     if (event.key === 'Enter') {
       event.preventDefault();
       input.blur();
@@ -597,7 +1801,7 @@ function commitDateInput(input) {
   const previousDate = controller ? controller.committed : '';
   if (controller) controller.committed = normalizedDate;
   if (controller && controller.onCommit && previousDate !== normalizedDate) {
-    controller.onCommit(normalizedDate);
+    controller.onCommit(normalizedDate, previousDate);
   }
   return true;
 }
@@ -613,7 +1817,7 @@ function setDateInputValue(input, date, options = {}) {
   if (controller) {
     controller.committed = normalizedDate;
     if (options.trigger && controller.onCommit && previousDate !== normalizedDate) {
-      controller.onCommit(normalizedDate);
+      controller.onCommit(normalizedDate, previousDate);
     }
   }
   return true;
@@ -628,25 +1832,6 @@ function committedDateInputValue(input) {
 
 function fallbackDateInputValue(input) {
   return committedDateInputValue(input) || formatLocalDate(currentEffectiveNow || new Date());
-}
-
-function sanitizeDateSegmentLengths(value) {
-  const text = clean(value);
-  if (!text) return '';
-  const parts = text.split(/[^\d]+/);
-
-  if (parts.length > 1) {
-    return [
-      (parts[0] || '').slice(0, 4),
-      (parts[1] || '').slice(0, 2),
-      (parts[2] || '').slice(0, 2)
-    ].filter((part) => part !== '').join('-');
-  }
-
-  const digits = text.replace(/\D/g, '').slice(0, 8);
-  if (digits.length <= 4) return digits;
-  if (digits.length <= 6) return `${digits.slice(0, 4)}-${digits.slice(4)}`;
-  return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`;
 }
 
 async function importScheduleFile() {
@@ -1002,22 +2187,527 @@ function markScheduleTimeConflicts(rows) {
 function openDailyPlanTableModal() {
   closeImportChoiceModal();
   const defaultDate = taskDateFilter.value || formatLocalDate(currentEffectiveNow);
-  dailyPlanSingleDay.checked = true;
+  dailyPlanMultiDay.checked = false;
   setDateInputValue(dailyPlanDate, defaultDate);
   setDateInputValue(dailyPlanStartDate, defaultDate);
   setDateInputValue(dailyPlanEndDate, defaultDate);
   syncDailyPlanDateMode();
   dailyPlanTableBody.innerHTML = '';
+  clearDailyPlanVoiceParsedState({ clearText: true });
   addDailyPlanRow('09:00-11:30');
   addDailyPlanRow('14:00-17:30');
+  dailyPlanVoiceCanceled = false;
+  dailyPlanVoiceFinalReceived = false;
+  setDailyPlanVoiceControls('idle');
+  setDailyPlanVoiceStatus('尚未开始语音识别。');
+  setDailyPlanVoicePageVisible(false);
   dailyPlanTableModal.classList.remove('hidden');
 }
 
 function closeDailyPlanTableModal() {
+  if (dailyPlanVoiceRecording) void cancelDailyPlanVoiceInput();
+  setDailyPlanVoicePageVisible(false);
   dailyPlanTableModal.classList.add('hidden');
 }
 
-function addDailyPlanRow(timeRange = '') {
+function openDailyPlanVoicePage() {
+  setDailyPlanVoicePageVisible(true);
+  if (dailyPlanModalCard) dailyPlanModalCard.scrollTop = 0;
+}
+
+function closeDailyPlanVoicePage() {
+  if (dailyPlanVoiceRecording) void cancelDailyPlanVoiceInput();
+  setDailyPlanVoicePageVisible(false);
+  if (dailyPlanModalCard) dailyPlanModalCard.scrollTop = 0;
+}
+
+function setDailyPlanVoicePageVisible(visible) {
+  if (dailyPlanLaunchPanel) dailyPlanLaunchPanel.classList.toggle('hidden', visible);
+  if (dailyPlanVoicePage) dailyPlanVoicePage.classList.toggle('hidden', !visible);
+}
+
+async function toggleDailyPlanVoiceInput() {
+  if (dailyPlanVoiceRecording) {
+    await stopDailyPlanVoiceInput();
+    return;
+  }
+  await startDailyPlanVoiceInput();
+}
+
+async function startDailyPlanVoiceInput() {
+  if (journalVoiceRecording || asrTestRecording || microphoneTestRecording) {
+    setDailyPlanVoiceStatus('请先停止其他正在使用麦克风的操作。', true);
+    return;
+  }
+  try {
+    const modelStatus = ensureAsrSuccess(await getAsrTestApi().getModelStatus());
+    if (modelStatus.state === 'downloading' || asrModelDownloadInFlight) {
+      setDailyPlanVoiceStatus('模型正在下载中，具体进度可到设置页查看。', 'warning');
+      return;
+    }
+  } catch (error) {
+    setDailyPlanVoiceStatus(describeDailyPlanVoiceError(error), true);
+    return;
+  }
+
+  clearDailyPlanVoiceParsedState({ clearText: true });
+  dailyPlanVoiceCanceled = false;
+  dailyPlanVoiceFinalReceived = false;
+  dailyPlanVoiceProcessing = false;
+  dailyPlanVoiceWarningActive = false;
+  dailyPlanVoiceCapturedSeconds = 0;
+  dailyPlanVoiceDecodedSeconds = 0;
+  dailyPlanVoiceDecodeRealtimeFactor = 0;
+  dailyPlanVoiceConversionStartedAt = 0;
+  clearDailyPlanVoiceTimer({ hide: true });
+  setDailyPlanVoiceControls('starting');
+  setDailyPlanVoiceStatus('正在加载本地语音识别器…');
+  let serviceStarted = false;
+  try {
+    const api = getAsrTestApi();
+    const modelStatus = ensureAsrSuccess(await api.getModelStatus());
+    const needsModelInstallation = !modelStatus.isReady;
+    if (needsModelInstallation) {
+      setDailyPlanVoiceStatus('模型正在下载中，具体进度可到设置页查看。', 'warning');
+    }
+    const initialization = await initializeAsrForUse(api);
+    if (needsModelInstallation) {
+      setDailyPlanVoiceControls('idle');
+      setDailyPlanVoiceStatus('模型已安装。请再次点击“开始录音”进行语音创建任务。');
+      return;
+    }
+    await ensureDailyPlanVoiceCapture(initialization.sampleRate, api);
+    const startResult = await api.start();
+    ensureAsrSuccess(startResult);
+    serviceStarted = true;
+
+    await dailyPlanVoiceCapture.start();
+    dailyPlanVoiceRecording = true;
+    startDailyPlanVoiceDurationTimers(startResult.maxRecordingDurationSeconds || 90);
+    startDailyPlanVoiceRecordingTimer(startResult.maxRecordingDurationSeconds || 90);
+    setDailyPlanVoiceControls('recording');
+    setDailyPlanVoiceStatus(`正在录音。VAD 已开启，单次最长 ${startResult.maxRecordingDurationSeconds || 90} 秒。建议按“开始时间到结束时间，任务标题，具体任务内容”的格式描述。`);
+  } catch (error) {
+    dailyPlanVoiceCanceled = true;
+    if (serviceStarted) {
+      try {
+        await getAsrTestApi().cancel();
+      } catch (cancelError) {
+        // Preserve the useful original error below.
+      }
+    }
+    await stopDailyPlanVoiceCapture();
+    dailyPlanVoiceRecording = false;
+    setDailyPlanVoiceControls('idle');
+    setDailyPlanVoiceStatus(describeDailyPlanVoiceError(error), true);
+    stopDailyPlanVoiceDurationTimers();
+    clearDailyPlanVoiceTimer({ hide: true });
+  }
+}
+
+async function stopDailyPlanVoiceInput({ automatic = false } = {}) {
+  if (!dailyPlanVoiceRecording || dailyPlanVoiceProcessing) return;
+  dailyPlanVoiceProcessing = true;
+  stopDailyPlanVoiceDurationTimers();
+  startDailyPlanVoiceConversionTimer();
+  setDailyPlanVoiceControls('processing');
+  setDailyPlanVoiceStatus('已结束本次录制，正在转成文字…');
+  try {
+    // Stop immediately releases the media tracks; the ASR worker only drains
+    // PCM that was already captured before this point.
+    await stopDailyPlanVoiceCapture();
+    const result = await getAsrTestApi().stop();
+    ensureAsrSuccess(result);
+    if (!dailyPlanVoiceCanceled && !dailyPlanVoiceFinalReceived && dailyPlanVoiceText) {
+      dailyPlanVoiceText.value = result.finalText || '';
+      dailyPlanVoiceFinalReceived = true;
+    }
+    finishDailyPlanVoiceConversionTimer();
+    setDailyPlanVoiceStatus(automatic
+      ? '已结束录制，识别文字已显示。'
+      : '识别完成。请检查并编辑原始文字，确认解析后点击“创建任务”保存。');
+  } catch (error) {
+    clearDailyPlanVoiceTimer({ hide: true });
+    setDailyPlanVoiceStatus(describeDailyPlanVoiceError(error), true);
+  } finally {
+    dailyPlanVoiceRecording = false;
+    dailyPlanVoiceProcessing = false;
+    stopDailyPlanVoiceDurationTimers();
+    setDailyPlanVoiceControls('idle');
+  }
+}
+
+async function cancelDailyPlanVoiceInput() {
+  if (!dailyPlanVoiceRecording) return;
+  dailyPlanVoiceCanceled = true;
+  dailyPlanVoiceProcessing = true;
+  stopDailyPlanVoiceDurationTimers();
+  clearDailyPlanVoiceTimer({ hide: true });
+  setDailyPlanVoiceControls('processing');
+  setDailyPlanVoiceStatus('正在取消本次录音…');
+  try {
+    await stopDailyPlanVoiceCapture();
+    const result = await getAsrTestApi().cancel();
+    ensureAsrSuccess(result);
+    setDailyPlanVoiceStatus('已取消本次录音。');
+  } catch (error) {
+    setDailyPlanVoiceStatus(describeDailyPlanVoiceError(error), true);
+  } finally {
+    dailyPlanVoiceRecording = false;
+    dailyPlanVoiceProcessing = false;
+    stopDailyPlanVoiceDurationTimers();
+    setDailyPlanVoiceControls('idle');
+  }
+}
+
+async function ensureDailyPlanVoiceCapture(sampleRate, api) {
+  if (!window.RizhiAsrAudioCapture || !window.RizhiAsrAudioCapture.AudioCapture) {
+    throw new Error('未能加载本地音频采集模块。');
+  }
+  if (dailyPlanVoiceCapture && dailyPlanVoiceCapture.sampleRate !== sampleRate) {
+    await dailyPlanVoiceCapture.dispose();
+    dailyPlanVoiceCapture = null;
+  }
+  if (!dailyPlanVoiceCapture) {
+    dailyPlanVoiceCapture = new window.RizhiAsrAudioCapture.AudioCapture({
+      sampleRate,
+      deviceId: getSelectedAudioInputDeviceId()
+    });
+    dailyPlanVoiceCaptureUnsubscribe = dailyPlanVoiceCapture.onAudioFrame((frame) => {
+      if (frame.error) {
+        setDailyPlanVoiceStatus(describeDailyPlanVoiceError(frame.error), true);
+        return;
+      }
+      try {
+      dailyPlanVoiceCapturedSeconds += frame.samples.length / frame.sampleRate;
+        api.sendAudioFrame(frame.sampleRate, frame.samples);
+      } catch (error) {
+        setDailyPlanVoiceStatus(describeDailyPlanVoiceError(error), true);
+      }
+    });
+  } else {
+    dailyPlanVoiceCapture.setDeviceId(getSelectedAudioInputDeviceId());
+  }
+  await dailyPlanVoiceCapture.initialize();
+}
+
+async function stopDailyPlanVoiceCapture() {
+  if (dailyPlanVoiceCapture) await dailyPlanVoiceCapture.stop();
+}
+
+
+function startDailyPlanVoiceDurationTimers(maxDurationSeconds) {
+  stopDailyPlanVoiceDurationTimers();
+  const timers = scheduleVoiceDurationTimers(maxDurationSeconds, {
+    isRecording: () => dailyPlanVoiceRecording && !dailyPlanVoiceProcessing,
+    onWarning: () => {
+      dailyPlanVoiceWarningActive = true;
+      setDailyPlanVoiceStatus('还有 10 秒录制时间，请准备结束本段录音。', 'warning');
+      playJournalVoiceWarningTone(dailyPlanVoiceCapture);
+    },
+    onMaximum: () => void stopDailyPlanVoiceInput({ automatic: true })
+  });
+  dailyPlanVoiceWarningTimer = timers.warningTimer;
+  dailyPlanVoiceMaximumTimer = timers.maximumTimer;
+}
+
+function stopDailyPlanVoiceDurationTimers() {
+  if (dailyPlanVoiceWarningTimer) window.clearTimeout(dailyPlanVoiceWarningTimer);
+  if (dailyPlanVoiceMaximumTimer) window.clearTimeout(dailyPlanVoiceMaximumTimer);
+  dailyPlanVoiceWarningTimer = null;
+  dailyPlanVoiceMaximumTimer = null;
+  dailyPlanVoiceWarningActive = false;
+}
+
+function setDailyPlanVoiceTimer(text, hidden = false) {
+  if (!dailyPlanVoiceTimer) return;
+  dailyPlanVoiceTimer.textContent = text;
+  dailyPlanVoiceTimer.classList.toggle('hidden', hidden);
+}
+
+function clearDailyPlanVoiceTimer({ hide = false } = {}) {
+  if (dailyPlanVoiceTimerInterval) window.clearInterval(dailyPlanVoiceTimerInterval);
+  dailyPlanVoiceTimerInterval = null;
+  if (hide) setDailyPlanVoiceTimer('', true);
+}
+
+function startDailyPlanVoiceRecordingTimer(maxDurationSeconds) {
+  clearDailyPlanVoiceTimer({ hide: true });
+  dailyPlanVoiceRecordingStartedAt = Date.now();
+  const maxSeconds = Math.max(1, Number(maxDurationSeconds) || 90);
+  const render = () => {
+    const elapsed = (Date.now() - dailyPlanVoiceRecordingStartedAt) / 1000;
+    setDailyPlanVoiceTimer(
+      `录音 ${formatVoiceDuration(elapsed)} / ${formatVoiceDuration(maxSeconds)}（剩余 ${formatVoiceDuration(maxSeconds - elapsed)}）`
+    );
+  };
+  render();
+  dailyPlanVoiceTimerInterval = window.setInterval(render, 250);
+}
+
+function startDailyPlanVoiceConversionTimer() {
+  clearDailyPlanVoiceTimer();
+  dailyPlanVoiceConversionStartedAt = Date.now();
+  const pendingAudioSeconds = Math.max(0.5, dailyPlanVoiceCapturedSeconds - dailyPlanVoiceDecodedSeconds);
+  const realtimeFactor = dailyPlanVoiceDecodeRealtimeFactor || 1.2;
+  const estimatedSeconds = Math.max(1, Math.ceil(pendingAudioSeconds * realtimeFactor));
+  const render = () => {
+    const elapsed = (Date.now() - dailyPlanVoiceConversionStartedAt) / 1000;
+    const remaining = estimatedSeconds - elapsed;
+    const suffix = remaining > 0 ? `预计剩余 ${formatVoiceDuration(remaining)}` : '正在完成最后一段';
+    setDailyPlanVoiceTimer(`转换 ${formatVoiceDuration(elapsed)}（${suffix}）`);
+  };
+  render();
+  dailyPlanVoiceTimerInterval = window.setInterval(render, 250);
+}
+
+function finishDailyPlanVoiceConversionTimer() {
+  if (!dailyPlanVoiceConversionStartedAt) return;
+  const elapsed = (Date.now() - dailyPlanVoiceConversionStartedAt) / 1000;
+  clearDailyPlanVoiceTimer();
+  setDailyPlanVoiceTimer(`转换完成，耗时 ${formatVoiceDuration(elapsed)}`);
+  dailyPlanVoiceConversionStartedAt = 0;
+}
+
+function updateDailyPlanVoiceDecodeEstimate(payload) {
+  const segmentSeconds = Number(payload && payload.segmentDurationSeconds);
+  const decodeMilliseconds = Number(payload && payload.decodeElapsedMs);
+  if (!(segmentSeconds > 0) || !(decodeMilliseconds >= 0)) return;
+  dailyPlanVoiceDecodedSeconds += segmentSeconds;
+  const observedFactor = decodeMilliseconds / (segmentSeconds * 1000);
+  dailyPlanVoiceDecodeRealtimeFactor = dailyPlanVoiceDecodeRealtimeFactor > 0
+    ? dailyPlanVoiceDecodeRealtimeFactor * 0.7 + observedFactor * 0.3
+    : observedFactor;
+}
+function setDailyPlanVoiceControls(state) {
+  if (!dailyPlanVoiceStartButton || !dailyPlanVoiceCancelButton) return;
+  if (state === 'recording') {
+    dailyPlanVoiceStartButton.disabled = false;
+    dailyPlanVoiceStartButton.textContent = '● 正在录音，点击停止';
+    dailyPlanVoiceCancelButton.classList.remove('hidden');
+    dailyPlanVoiceCancelButton.disabled = false;
+    return;
+  }
+  if (state === 'starting' || state === 'processing') {
+    dailyPlanVoiceStartButton.disabled = true;
+    dailyPlanVoiceStartButton.textContent = state === 'processing' ? '正在识别…' : '正在准备…';
+    dailyPlanVoiceCancelButton.classList.toggle('hidden', state === 'starting');
+    dailyPlanVoiceCancelButton.disabled = true;
+    return;
+  }
+  dailyPlanVoiceStartButton.disabled = false;
+  dailyPlanVoiceStartButton.textContent = '开始录音';
+  dailyPlanVoiceCancelButton.disabled = false;
+  dailyPlanVoiceCancelButton.classList.add('hidden');
+}
+
+function setDailyPlanVoiceStatus(message, state = '') {
+  if (!dailyPlanVoiceStatus) return;
+  dailyPlanVoiceStatus.textContent = message;
+  const normalizedState = state === true ? 'error' : state;
+  dailyPlanVoiceStatus.classList.toggle('is-error', normalizedState === 'error');
+  dailyPlanVoiceStatus.classList.toggle('is-warning', normalizedState === 'warning');
+}
+
+function describeDailyPlanVoiceError(error) {
+  if (error && error.code === 'ASR_MODEL_DOWNLOADING') return '模型正在下载中，请稍后使用。';
+  if (error && error.code === 'ASR_MODEL_DOWNLOAD_CANCELED') return '已取消模型下载。需要时可再次点击“开始录音”。';
+  if (error && error.code === 'MIC_PERMISSION_DENIED') return `无法开始语音创建任务：${error.message}`;
+  if (error && error.code === 'MIC_DEVICE_NOT_FOUND') return `无法开始语音创建任务：${error.message}`;
+  return `语音创建任务失败：${error && error.message ? error.message : String(error)}`;
+}
+
+async function confirmDailyPlanVoiceText() {
+  const text = clean(dailyPlanVoiceText && dailyPlanVoiceText.value);
+  if (!text) {
+    clearDailyPlanVoiceParsedState();
+    setDailyPlanVoiceStatus('当前没有可解析的识别文字。', true);
+    return;
+  }
+
+  dailyPlanVoiceConfirmButton.disabled = true;
+  if (dailyPlanVoiceApplyButton) dailyPlanVoiceApplyButton.disabled = true;
+  setDailyPlanVoiceStatus('正在本地解析文字…');
+  try {
+    let candidates = parseStructuredDailyPlanVoiceText(text);
+    if (!candidates) {
+      if (!window.whbr || typeof window.whbr.parseTaskText !== 'function') {
+        throw new Error('本地任务解析器不可用，请重新启动应用。');
+      }
+      const response = await window.whbr.parseTaskText(text, getDailyPlanVoiceReferenceDate());
+      if (!response || !response.ok || !response.result) {
+        throw new Error(response && response.error && response.error.message ? response.error.message : '本地任务解析失败。');
+      }
+      candidates = Array.isArray(response.result.tasks)
+        ? response.result.tasks.map(normalizeDailyPlanVoiceCandidate)
+        : [];
+    }
+    if (candidates.length === 0) {
+      clearDailyPlanVoiceParsedState();
+      setDailyPlanVoiceStatus('未识别到完整时间段。请补充“几点到几点”的表达后重新解析。', true);
+      return;
+    }
+
+    const parsedText = candidates.map(formatDailyPlanVoiceCandidate).join('\n');
+    dailyPlanVoiceParsedCandidates = candidates;
+    dailyPlanVoiceParsedText = parsedText;
+    dailyPlanVoiceText.value = parsedText;
+
+    const invalidLines = candidates
+      .map((candidate, index) => ({
+        line: index + 1,
+        missing: requiredDailyPlanVoiceCandidateFields(candidate)
+      }))
+      .filter((item) => item.missing.length > 0);
+
+    if (invalidLines.length) {
+      const summary = invalidLines
+        .map((item) => `第 ${item.line} 行缺少${item.missing.map(dailyPlanVoiceFieldLabel).join('、')}`)
+        .join('；');
+      setDailyPlanVoiceStatus(`${summary}。请修改文字后重新解析。`, true);
+      return;
+    }
+
+    setDailyPlanVoiceStatus(`已解析出 ${candidates.length} 条任务。确认文本无误后点击“确定”回填创建任务页。`);
+  } catch (error) {
+    clearDailyPlanVoiceParsedState();
+    setDailyPlanVoiceStatus(`任务解析失败：${error && error.message ? error.message : String(error)}`, true);
+  } finally {
+    dailyPlanVoiceConfirmButton.disabled = false;
+    if (dailyPlanVoiceApplyButton) dailyPlanVoiceApplyButton.disabled = false;
+  }
+}
+
+function getDailyPlanVoiceReferenceDate() {
+  if (dailyPlanMultiDay && dailyPlanMultiDay.checked) {
+    return (dailyPlanStartDate && dailyPlanStartDate.value) || (dailyPlanDate && dailyPlanDate.value) || '';
+  }
+  return dailyPlanDate && dailyPlanDate.value;
+}
+
+function normalizeDailyPlanVoiceCandidate(task = {}) {
+  return {
+    startTime: clean(task.startTime),
+    endTime: clean(task.endTime),
+    title: clean(task.title),
+    details: clean(task.details),
+    type: TASK_TYPES.includes(clean(task.type)) ? clean(task.type) : ''
+  };
+}
+
+function parseStructuredDailyPlanVoiceText(text) {
+  const lines = String(text || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length === 0) return null;
+
+  const pattern = /^起始时间[：:]\s*(.*?)\s*[，,]\s*结束时间[：:]\s*(.*?)\s*[，,]\s*任务[：:]\s*(.*?)\s*[，,]\s*具体内容[：:]\s*(.*?)\s*[，,]\s*类型[：:]\s*(.*?)\s*$/;
+  const candidates = [];
+  for (const line of lines) {
+    const match = line.match(pattern);
+    if (!match) return null;
+    candidates.push(normalizeDailyPlanVoiceCandidate({
+      startTime: match[1],
+      endTime: match[2],
+      title: match[3],
+      details: match[4],
+      type: match[5]
+    }));
+  }
+  return candidates;
+}
+
+function formatDailyPlanVoiceCandidate(candidate) {
+  const inlineText = (value) => clean(value).replace(/[\r\n]+/g, ' ');
+  return [
+    `起始时间：${inlineText(candidate.startTime)}`,
+    `结束时间：${inlineText(candidate.endTime)}`,
+    `任务：${inlineText(candidate.title)}`,
+    `具体内容：${inlineText(candidate.details)}`,
+    `类型：${inlineText(candidate.type)}`
+  ].join('，');
+}
+
+function requiredDailyPlanVoiceCandidateFields(candidate) {
+  const missing = [];
+  if (!candidate.startTime) missing.push('startTime');
+  if (!candidate.endTime) missing.push('endTime');
+  if (!candidate.title) missing.push('title');
+  if (!TASK_TYPES.includes(candidate.type)) missing.push('type');
+  const range = extractTimeRangeFromInput(`${candidate.startTime}-${candidate.endTime}`);
+  if (candidate.startTime && candidate.endTime && !range) missing.push('startTime', 'endTime');
+  return Array.from(new Set(missing));
+}
+
+function dailyPlanVoiceFieldLabel(field) {
+  return {
+    startTime: '起始时间',
+    endTime: '结束时间',
+    title: '任务',
+    type: '类型'
+  }[field] || field;
+}
+
+function invalidateDailyPlanVoiceParse() {
+  if (dailyPlanVoiceParsedCandidates.length === 0) return;
+  if (dailyPlanVoiceText && dailyPlanVoiceText.value === dailyPlanVoiceParsedText) return;
+  dailyPlanVoiceParsedCandidates = [];
+  dailyPlanVoiceParsedText = '';
+  setDailyPlanVoiceStatus('文字已修改，请重新点击“解析”后再确定。', 'warning');
+}
+
+function applyDailyPlanVoiceTasks() {
+  if (dailyPlanVoiceParsedCandidates.length === 0 || !dailyPlanVoiceParsedText) {
+    setDailyPlanVoiceStatus('请先点击“解析”，解析成功后才能确定。', true);
+    return;
+  }
+
+  if (!dailyPlanVoiceText || dailyPlanVoiceText.value !== dailyPlanVoiceParsedText) {
+    invalidateDailyPlanVoiceParse();
+    setDailyPlanVoiceStatus('解析后的文字已被修改，请重新解析后再确定。', true);
+    return;
+  }
+
+  const invalidLines = dailyPlanVoiceParsedCandidates
+    .map((candidate, index) => ({
+      line: index + 1,
+      missing: requiredDailyPlanVoiceCandidateFields(candidate)
+    }))
+    .filter((item) => item.missing.length > 0);
+  if (invalidLines.length) {
+    setDailyPlanVoiceStatus('解析结果存在缺少时间、任务或类型的行，请修改后重新解析。', true);
+    return;
+  }
+
+  Array.from(dailyPlanTableBody.querySelectorAll('tr')).forEach((row) => {
+    const title = clean(row.querySelector('td:nth-child(2) input')?.value);
+    const details = clean(row.querySelector('td:nth-child(3) input')?.value);
+    if (!title && !details) row.remove();
+  });
+
+  dailyPlanVoiceParsedCandidates.forEach((candidate) => {
+    addDailyPlanRow(`${candidate.startTime}-${candidate.endTime}`, {
+      title: candidate.title,
+      planDetails: candidate.details,
+      type: candidate.type
+    });
+  });
+
+  const count = dailyPlanVoiceParsedCandidates.length;
+  clearDailyPlanVoiceParsedState({ clearText: true });
+  setDailyPlanVoiceStatus('尚未开始语音识别。');
+  closeDailyPlanVoicePage();
+  setStatus(`已将 ${count} 条语音解析结果填入创建任务列表，请核对后点击“确定安排”。`, 'hidden');
+}
+
+function clearDailyPlanVoiceParsedState(options = {}) {
+  dailyPlanVoiceParsedCandidates = [];
+  dailyPlanVoiceParsedText = '';
+  if (options.clearText && dailyPlanVoiceText) dailyPlanVoiceText.value = '';
+}
+
+function addDailyPlanRow(timeRange = '', values = {}) {
   const row = document.createElement('tr');
   const timeCell = document.createElement('td');
   const timeInput = document.createElement('input');
@@ -1030,27 +2720,57 @@ function addDailyPlanRow(timeRange = '') {
   const titleInput = document.createElement('input');
   titleInput.type = 'text';
   titleInput.placeholder = '做什么事';
+  titleInput.value = clean(values.title);
   titleCell.appendChild(titleInput);
 
   const planCell = document.createElement('td');
   const planInput = document.createElement('input');
   planInput.type = 'text';
   planInput.placeholder = '具体要做什么，可不填';
+  planInput.value = clean(values.planDetails);
   planCell.appendChild(planInput);
 
   const typeCell = document.createElement('td');
-  typeCell.appendChild(createTypeSelect('工作'));
+  typeCell.appendChild(createTypeSelect(values.type || '工作'));
 
-  row.append(timeCell, titleCell, planCell, typeCell);
+  const actionCell = document.createElement('td');
+  actionCell.className = 'row-action-cell';
+  const deleteButton = document.createElement('button');
+  deleteButton.type = 'button';
+  deleteButton.className = 'delete-table-row';
+  deleteButton.textContent = '×';
+  deleteButton.setAttribute('aria-label', '删除这一条任务');
+  deleteButton.title = '删除这一条任务';
+  deleteButton.addEventListener('click', () => row.remove());
+  actionCell.appendChild(deleteButton);
+
+  row.append(timeCell, titleCell, planCell, typeCell, actionCell);
   dailyPlanTableBody.appendChild(row);
 }
 
-function syncDailyPlanDateMode() {
-  const singleDay = Boolean(dailyPlanSingleDay && dailyPlanSingleDay.checked);
-  dailyPlanSingleDateRow.classList.toggle('hidden', !singleDay);
-  dailyPlanRangeRow.classList.toggle('hidden', singleDay);
+function handleDailyPlanDateModeChange() {
+  if (!dailyPlanMultiDay) return;
+  if (dailyPlanMultiDay.checked) {
+    commitDateInput(dailyPlanDate);
+    const date = normalizeDate(dailyPlanDate.value) || taskDateFilter.value || formatLocalDate(currentEffectiveNow);
+    setDateInputValue(dailyPlanStartDate, date);
+    setDateInputValue(dailyPlanEndDate, date);
+  } else {
+    commitDateInput(dailyPlanStartDate);
+    const date = normalizeDate(dailyPlanStartDate.value) || dailyPlanDate.value || taskDateFilter.value || formatLocalDate(currentEffectiveNow);
+    setDateInputValue(dailyPlanDate, date);
+  }
+  syncDailyPlanDateMode();
+}
 
-  if (singleDay) {
+function syncDailyPlanDateMode() {
+  const multiDay = Boolean(dailyPlanMultiDay && dailyPlanMultiDay.checked);
+  dailyPlanSingleDateRow.classList.toggle('hidden', multiDay);
+  dailyPlanSingleDateRow.setAttribute('aria-hidden', multiDay ? 'true' : 'false');
+  dailyPlanRangeRow.classList.toggle('hidden', !multiDay);
+  dailyPlanRangeRow.setAttribute('aria-hidden', multiDay ? 'false' : 'true');
+
+  if (!multiDay) {
     setDateInputValue(dailyPlanDate, dailyPlanDate.value || dailyPlanStartDate.value || taskDateFilter.value || formatLocalDate(currentEffectiveNow));
     return;
   }
@@ -1142,7 +2862,7 @@ function selectedDailyPlanDates() {
   commitDateInput(dailyPlanDate);
   commitDateInput(dailyPlanStartDate);
   commitDateInput(dailyPlanEndDate);
-  if (dailyPlanSingleDay && dailyPlanSingleDay.checked) {
+  if (!dailyPlanMultiDay || !dailyPlanMultiDay.checked) {
     const date = normalizeDate(dailyPlanDate.value);
     return date ? [date] : [];
   }
@@ -1197,16 +2917,16 @@ function renderTasks(options = {}) {
     const time = document.createElement('div');
     time.className = 'task-time task-time-editor';
     time.classList.toggle('task-time-conflict-text', hasTimeConflict);
-    const startInput = createInlineInput('time', task.startTime, '开始时间');
-    startInput.classList.add('time-input');
+    const startInput = createTaskTimeInput(task.startTime, '开始时间');
     startInput.classList.toggle('time-conflict', hasTimeConflict);
     const separator = document.createElement('span');
     separator.textContent = '-';
-    const endInput = createInlineInput('time', task.endTime, '结束时间');
-    endInput.classList.add('time-input');
+    const endInput = createTaskTimeInput(task.endTime, '结束时间');
     endInput.classList.toggle('time-conflict', hasTimeConflict);
-    startInput.addEventListener('blur', () => updateTaskField(task.id, 'startTime', startInput.value));
-    endInput.addEventListener('blur', () => updateTaskField(task.id, 'endTime', endInput.value));
+    startInput.addEventListener('input', () => handleTaskTimeInput(startInput, endInput));
+    endInput.addEventListener('input', () => handleTaskTimeInput(endInput));
+    startInput.addEventListener('blur', () => commitTaskTimeField(task.id, 'startTime', startInput));
+    endInput.addEventListener('blur', () => commitTaskTimeField(task.id, 'endTime', endInput));
     time.append(startInput, separator, endInput);
 
     const body = document.createElement('div');
@@ -1429,7 +3149,39 @@ function showPage(page) {
   Object.values(pages).forEach((section) => section.classList.remove('active'));
   pages[page].classList.add('active');
   pageTitle.textContent = pageTitleFor(page);
+  updateSettingsAsrDownloadProgress();
+  if (page === 'records') showRecordsView('editor');
   if (page === 'profile') renderProfileStats();
+  if (page === 'settings') clearSettingsPanel();
+}
+
+function showRecordsView(view) {
+  recordsView = view === 'list' ? 'list' : 'editor';
+  if (recordsLayout) {
+    recordsLayout.classList.toggle('is-list-view', recordsView === 'list');
+    recordsLayout.classList.toggle('is-editor-view', recordsView !== 'list');
+    recordsLayout.scrollTop = 0;
+  }
+  if (journalEditorPanel) journalEditorPanel.classList.toggle('hidden', recordsView === 'list');
+  if (recordsListPanel) recordsListPanel.classList.toggle('hidden', recordsView !== 'list');
+  if (recordsView === 'list') renderJournalList();
+}
+
+function showSettingsPanel(panelKey) {
+  const normalizedKey = clean(panelKey);
+  settingsMenuButtons.forEach((button) => {
+    button.classList.toggle('active', button.dataset.settingsPanel === normalizedKey);
+  });
+  settingsPanels.forEach((panel) => {
+    panel.classList.toggle('hidden', panel.dataset.settingsPanel !== normalizedKey);
+  });
+  if (settingsEmptyPanel) settingsEmptyPanel.classList.toggle('hidden', Boolean(normalizedKey));
+}
+
+function clearSettingsPanel() {
+  settingsMenuButtons.forEach((button) => button.classList.remove('active'));
+  settingsPanels.forEach((panel) => panel.classList.add('hidden'));
+  if (settingsEmptyPanel) settingsEmptyPanel.classList.remove('hidden');
 }
 
 async function goToCurrentTask() {
@@ -1466,6 +3218,7 @@ function mergeTasks(currentTasks, importedTasks) {
       rawText: clean(task.rawText),
       sheetName: clean(task.sheetName),
       source: clean(task.source),
+      splitParentId: clean(task.splitParentId),
       order,
       isDraft: Boolean(task.isDraft)
     };
@@ -1476,12 +3229,6 @@ function mergeTasks(currentTasks, importedTasks) {
   });
 
   return Array.from(taskMap.values());
-}
-
-function beginManualPlanning() {
-  const selectedDate = ensureSelectedDate();
-  activePlanningDates.add(selectedDate);
-  renderTasks();
 }
 
 async function addTaskForSelectedDate() {
@@ -1585,6 +3332,61 @@ function createInlineInput(type, value, label) {
   return input;
 }
 
+function createTaskTimeInput(value, label) {
+  const input = createInlineInput('text', formatTaskTimeInput(value), label);
+  input.classList.add('time-input');
+  input.inputMode = 'numeric';
+  input.maxLength = 5;
+  input.placeholder = '--:--';
+  return input;
+}
+
+function handleTaskTimeInput(input, nextInput = null) {
+  const previousLength = input.value.length;
+  input.value = formatTaskTimeInput(input.value);
+  if (input.value.length !== previousLength) {
+    input.setSelectionRange(input.value.length, input.value.length);
+  }
+
+  const digits = input.value.replace(/\D/g, '');
+  if (digits.length < 4) {
+    input.dataset.autoAdvanced = '';
+    return;
+  }
+
+  if (!nextInput || input.dataset.autoAdvanced === 'true' || !normalizeTaskTimeInput(input.value)) return;
+  input.dataset.autoAdvanced = 'true';
+  window.setTimeout(() => {
+    if (document.activeElement !== input) return;
+    nextInput.focus();
+    nextInput.select();
+  }, 0);
+}
+
+function formatTaskTimeInput(value) {
+  const digits = clean(value).replace(/\D/g, '').slice(0, 4);
+  if (digits.length === 0) return '';
+  if (digits.length <= 2) return digits.length === 2 ? `${digits}:` : digits;
+  return `${digits.slice(0, 2)}:${digits.slice(2)}`;
+}
+
+function normalizeTaskTimeInput(value) {
+  const text = clean(value);
+  const match = text.match(/^(\d{2}):(\d{2})$/);
+  if (!match) return '';
+
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours > 23 || minutes > 59) return '';
+  return `${match[1]}:${match[2]}`;
+}
+
+function commitTaskTimeField(taskId, field, input) {
+  const normalized = normalizeTaskTimeInput(input.value);
+  input.value = normalized;
+  updateTaskField(taskId, field, normalized, { render: false, splitCrossDay: true });
+}
+
 function createTypeSelect(value) {
   const select = document.createElement('select');
   select.className = `task-type-select type-${normalizeTaskType(value)}`;
@@ -1611,7 +3413,7 @@ function blurOnEnter(event) {
   }
 }
 
-async function updateTaskField(taskId, field, value) {
+async function updateTaskField(taskId, field, value, options = {}) {
   const task = tasks.find((item) => item.id === taskId);
   if (!task) return;
 
@@ -1622,13 +3424,214 @@ async function updateTaskField(taskId, field, value) {
   if (['title', 'startTime', 'endTime', 'planDetails'].includes(field)) {
     task.isDraft = !clean(task.title) || !clean(task.startTime) || !clean(task.endTime);
   }
+  const normalizedTasks = options.splitCrossDay ? normalizeTaskDayBoundaries() : { changed: false };
 
   await saveState();
+  if (options.render === false) {
+    if (normalizedTasks.changed) {
+      renderTasksPreservingScroll();
+      return;
+    }
+    refreshTasksAfterInlineEdit(taskId);
+    return;
+  }
   renderTasks();
 }
 
+function refreshTasksAfterInlineEdit(taskId) {
+  const selectedDate = clean(taskDateFilter.value);
+  const visibleTasks = selectedDate
+    ? tasks.filter((task) => isRenderableTask(task) && normalizeDate(task.date) === selectedDate)
+    : tasks.filter(isRenderableTask);
+  const conflictingTaskIds = findConflictingTaskIds(sortTasksForDisplay(visibleTasks));
+  renderTaskDurationSummary(visibleTasks);
+
+  taskList.querySelectorAll('.task-card').forEach((card) => {
+    const task = tasks.find((item) => item.id === card.dataset.taskId);
+    if (!task) return;
+
+    const hasTimeConflict = conflictingTaskIds.has(task.id);
+    syncTaskCardTimeInputs(card, task);
+    card.classList.toggle('task-time-conflict', hasTimeConflict);
+    card.title = hasTimeConflict ? '这个时间段与同一天的其他任务冲突，请修改开始或结束时间。' : '';
+    const timeEditor = card.querySelector('.task-time-editor');
+    if (timeEditor) timeEditor.classList.toggle('task-time-conflict-text', hasTimeConflict);
+    card.querySelectorAll('.time-input').forEach((input) => {
+      input.classList.toggle('time-conflict', hasTimeConflict);
+    });
+  });
+
+  updateTaskTemporalView({ scrollToCurrent: false });
+  if (taskId && selectedDate) activePlanningDates.add(selectedDate);
+}
+
+function renderTasksPreservingScroll() {
+  const scrollTop = taskList ? taskList.scrollTop : 0;
+  renderTasks({ scrollToCurrent: false, forceScroll: false });
+  if (taskList) taskList.scrollTop = scrollTop;
+}
+
+function syncTaskCardTimeInputs(card, task) {
+  const inputs = Array.from(card.querySelectorAll('.time-input'));
+  const values = [task.startTime, task.endTime];
+  inputs.forEach((input, index) => {
+    if (document.activeElement === input) return;
+    input.value = formatTaskTimeInput(values[index] || '');
+  });
+}
+
+function normalizeTaskDayBoundaries() {
+  const before = taskNormalizationSignature(tasks);
+  const restoredTasks = restoreSplitTaskParents(tasks);
+  const grouped = groupTasksByOriginalDate(restoredTasks);
+  const normalizedTasks = [];
+  const orderCounters = new Map();
+
+  Array.from(grouped.keys()).sort().forEach((date) => {
+    let dayOffset = 0;
+    let previousStart = null;
+    const dayTasks = grouped.get(date);
+
+    dayTasks.forEach((task) => {
+      const start = timeToMinutes(task.startTime);
+      const end = timeToMinutes(task.endTime);
+      if (start !== null && previousStart !== null && start < previousStart) dayOffset += 1;
+      previousStart = start === null ? previousStart : start;
+
+      const actualDate = shiftDate(date, dayOffset);
+      normalizedTasks.push(...normalizeTaskIntoDayPieces(task, actualDate, orderCounters));
+    });
+  });
+
+  tasks = resolveDayOverlaps(normalizedTasks);
+  return { changed: before !== taskNormalizationSignature(tasks) };
+}
+
+function restoreSplitTaskParents(taskItems) {
+  const baseTasks = taskItems
+    .filter((task) => !clean(task.splitParentId))
+    .map((task) => ({ ...task, splitParentId: '' }));
+  const byId = new Map(baseTasks.map((task) => [task.id, task]));
+
+  taskItems.forEach((task) => {
+    const parentId = clean(task.splitParentId);
+    if (!parentId) return;
+    const parent = byId.get(parentId);
+    if (parent && parent.endTime === '00:00' && task.startTime === '00:00') {
+      parent.endTime = task.endTime;
+      return;
+    }
+    baseTasks.push({ ...task, splitParentId: '' });
+  });
+
+  return baseTasks;
+}
+
+function groupTasksByOriginalDate(taskItems) {
+  return taskItems.reduce((groups, task) => {
+    const date = normalizeDate(task.date);
+    if (!date) return groups;
+    if (!groups.has(date)) groups.set(date, []);
+    groups.get(date).push(task);
+    groups.get(date).sort(compareTasksByOrderThenTime);
+    return groups;
+  }, new Map());
+}
+
+function compareTasksByOrderThenTime(a, b) {
+  const orderA = Number.isFinite(Number(a.order)) ? Number(a.order) : Number.MAX_SAFE_INTEGER;
+  const orderB = Number.isFinite(Number(b.order)) ? Number(b.order) : Number.MAX_SAFE_INTEGER;
+  if (orderA !== orderB) return orderA - orderB;
+  return normalizeTime(a.startTime).localeCompare(normalizeTime(b.startTime));
+}
+
+function normalizeTaskIntoDayPieces(task, date, orderCounters) {
+  const start = timeToMinutes(task.startTime);
+  const end = timeToMinutes(task.endTime);
+  const normalizedDate = normalizeDate(date);
+  if (start === null || end === null || end === 0 || start <= end) {
+    return [normalizeTaskPiece(task, normalizedDate, task.startTime, task.endTime, '', orderCounters)];
+  }
+
+  const nextDate = shiftDate(normalizedDate, 1);
+  return [
+    normalizeTaskPiece(task, normalizedDate, task.startTime, '00:00', '', orderCounters),
+    normalizeTaskPiece(task, nextDate, '00:00', task.endTime, task.id, orderCounters)
+  ];
+}
+
+function normalizeTaskPiece(task, date, startTime, endTime, splitParentId, orderCounters) {
+  return {
+    ...task,
+    id: splitParentId ? `split-${task.id}-${date}` : task.id,
+    date,
+    weekday: weekdayFromDate(date),
+    startTime,
+    endTime,
+    splitParentId,
+    order: nextNormalizedOrder(date, orderCounters),
+    isDraft: !clean(task.title) || !clean(startTime) || !clean(endTime)
+  };
+}
+
+function nextNormalizedOrder(date, counters) {
+  const key = normalizeDate(date) || '__all__';
+  const next = (counters.get(key) || 0) + 10;
+  counters.set(key, next);
+  return next;
+}
+
+function resolveDayOverlaps(taskItems) {
+  const grouped = groupTasksByOriginalDate(taskItems);
+  const resolved = [];
+
+  Array.from(grouped.keys()).sort().forEach((date) => {
+    const dayTasks = grouped.get(date).sort((a, b) => {
+      const startCompare = timeToMinutes(a.startTime) - timeToMinutes(b.startTime);
+      return startCompare || compareTasksByOrderThenTime(a, b);
+    });
+
+    dayTasks.forEach((task) => {
+      const previous = resolved[resolved.length - 1];
+      if (previous && normalizeDate(previous.date) === date) {
+        const previousEnd = comparableDayEnd(previous.endTime);
+        const currentStart = timeToMinutes(task.startTime);
+        if (previousEnd !== null && currentStart !== null && currentStart < previousEnd) {
+          previous.endTime = minutesToTime(currentStart);
+        }
+      }
+      if (taskDurationMinutes(task) > 0 || task.isDraft) resolved.push(task);
+    });
+  });
+
+  return resolved;
+}
+
+function comparableDayEnd(value) {
+  const minutes = timeToMinutes(value);
+  if (minutes === null) return null;
+  return minutes === 0 ? 24 * 60 : minutes;
+}
+
+function minutesToTime(minutes) {
+  const normalized = Math.max(0, Math.min(24 * 60, minutes));
+  if (normalized === 24 * 60) return '00:00';
+  return `${String(Math.floor(normalized / 60)).padStart(2, '0')}:${String(normalized % 60).padStart(2, '0')}`;
+}
+
+function taskNormalizationSignature(taskItems) {
+  return JSON.stringify(taskItems.map((task) => ({
+    id: clean(task.id),
+    date: normalizeDate(task.date),
+    startTime: clean(task.startTime),
+    endTime: clean(task.endTime),
+    order: Number(task.order) || 0,
+    splitParentId: clean(task.splitParentId)
+  })).sort((a, b) => a.id.localeCompare(b.id)));
+}
+
 async function deleteTask(taskId) {
-  tasks = tasks.filter((task) => task.id !== taskId);
+  tasks = tasks.filter((task) => task.id !== taskId && clean(task.splitParentId) !== taskId);
   await saveState();
   renderTasks();
 }
@@ -1911,16 +3914,6 @@ function trimOldReminderKeys(currentDate) {
   });
 }
 
-function timeToMinutes(value) {
-  const match = clean(value).match(/^(\d{1,2}):(\d{2})$/);
-  if (!match) return null;
-
-  const hours = Number(match[1]);
-  const minutes = Number(match[2]);
-  if (hours > 23 || minutes > 59) return null;
-  return hours * 60 + minutes;
-}
-
 function taskDurationMinutes(task) {
   const start = timeToMinutes(task.startTime);
   const end = timeToMinutes(task.endTime);
@@ -2043,26 +4036,6 @@ function findConflictingRangeIndexes(items) {
   return conflicted;
 }
 
-function inputRangeToComparableIntervals(value) {
-  const timeRange = extractTimeRangeFromInput(value);
-  if (!timeRange) return [];
-  return rangeToComparableIntervals(timeRange.startTime, timeRange.endTime);
-}
-
-function rangeToComparableIntervals(startTime, endTime) {
-  const start = timeToMinutes(startTime);
-  const end = timeToMinutes(endTime);
-  if (start === null || end === null || start === end) return [];
-  if (end > start) return [[start, end], [start + 1440, end + 1440]];
-  return [[start, end + 1440], [start - 1440, end]];
-}
-
-function rangesOverlap(firstIntervals, secondIntervals) {
-  return firstIntervals.some(([firstStart, firstEnd]) => (
-    secondIntervals.some(([secondStart, secondEnd]) => firstStart < secondEnd && secondStart < firstEnd)
-  ));
-}
-
 function nextOrderForDate(date, counters = null) {
   const normalizedDate = normalizeDate(date);
   const counterKey = normalizedDate || '__all__';
@@ -2119,14 +4092,19 @@ function normalizeJournalCollection(items) {
 }
 
 async function saveSelectedJournal() {
-  commitDateInput(journalDate);
-  const date = clean(journalDate.value);
+  if (journalDateChangePending) return false;
+  const date = committedDateInputValue(journalDate) || normalizeDate(journalDate.value);
+
+  return saveJournalForDate(date);
+}
+
+async function saveJournalForDate(date) {
   const content = clean(journalContent.value);
   const tagId = normalizeJournalTagId(journalTag ? journalTag.value : '');
 
   if (!date) {
     journalSaveState.textContent = '请先选择日期';
-    return;
+    return false;
   }
 
   journals = mergeJournals(journals, [{
@@ -2145,6 +4123,89 @@ async function saveSelectedJournal() {
   await saveState();
   renderJournalList();
   journalSaveState.textContent = content ? '已保存' : '已清空';
+  return true;
+}
+
+function hasUnsavedJournalChanges(dateOverride = '') {
+  if (!journalContent || !journalDate) return false;
+  const date = normalizeDate(dateOverride || committedDateInputValue(journalDate) || journalDate.value);
+  const content = clean(journalContent.value);
+  const tagId = normalizeJournalTagId(journalTag ? journalTag.value : '');
+
+  if (!date) return Boolean(content || tagId);
+
+  const journal = findJournalForDate(date, date);
+  const savedContent = journal ? clean(journal.content) : '';
+  const savedTagId = journal ? normalizeJournalTagId(journal.tagId) : '';
+  return content !== savedContent || tagId !== savedTagId;
+}
+
+async function handleJournalDateCommit(nextDate, previousDate) {
+  if (!previousDate || !hasUnsavedJournalChanges(previousDate)) {
+    renderSelectedJournal();
+    return;
+  }
+
+  journalDateChangePending = true;
+  try {
+    const choice = await openJournalUnsavedModal();
+    if (choice === 'cancel') {
+      setDateInputValue(journalDate, previousDate);
+      return;
+    }
+
+    if (choice === 'save') {
+      const saved = await saveJournalForDate(previousDate);
+      if (!saved) {
+        setDateInputValue(journalDate, previousDate);
+        return;
+      }
+    }
+
+    setDateInputValue(journalDate, nextDate);
+    renderSelectedJournal();
+  } finally {
+    journalDateChangePending = false;
+  }
+}
+
+function updateJournalDirtyState() {
+  if (!journalSaveState) return;
+  if (hasUnsavedJournalChanges()) {
+    journalSaveState.textContent = '尚未保存';
+  }
+}
+
+async function confirmLeaveRecordsPageIfNeeded(targetPage) {
+  if (targetPage === 'records') return true;
+  if (!pages.records.classList.contains('active')) return true;
+  if (!hasUnsavedJournalChanges()) return true;
+
+  const choice = await openJournalUnsavedModal();
+  if (choice === 'cancel') return false;
+  if (choice === 'discard') {
+    renderSelectedJournal();
+    return true;
+  }
+
+  return saveSelectedJournal();
+}
+
+function openJournalUnsavedModal() {
+  if (!journalUnsavedModal) return Promise.resolve('cancel');
+  journalUnsavedModal.classList.remove('hidden');
+  if (saveJournalBeforeLeaveButton) saveJournalBeforeLeaveButton.focus();
+  return new Promise((resolve) => {
+    pendingJournalUnsavedResolver = resolve;
+  });
+}
+
+function resolveJournalUnsavedChoice(choice) {
+  if (!pendingJournalUnsavedResolver) return;
+  journalUnsavedModal.classList.add('hidden');
+  const resolver = pendingJournalUnsavedResolver;
+  pendingJournalUnsavedResolver = null;
+  resolver(choice);
 }
 
 function renderSelectedJournal() {
@@ -2154,6 +4215,40 @@ function renderSelectedJournal() {
   if (journalTag) journalTag.value = normalizeJournalTagId(journal && journal.tagId);
   renderTagPicker(journalTag, journalTagPaletteButton, journalTagPalette);
   journalSaveState.textContent = journal ? '已加载' : '尚未保存';
+}
+
+function preserveRecordsScroll(callback) {
+  const scroller = recordsLayout;
+  const anchor = journalList || document.querySelector('.records-list-panel');
+  const previousScrollTop = scroller ? scroller.scrollTop : 0;
+  const previousAnchorTop = anchor ? anchor.getBoundingClientRect().top : 0;
+  const activeElement = document.activeElement;
+
+  callback();
+
+  if (!scroller || !anchor) return;
+
+  const restore = () => {
+    const nextAnchorTop = anchor.getBoundingClientRect().top;
+    scroller.scrollTop = previousScrollTop + (nextAnchorTop - previousAnchorTop);
+    if (activeElement && typeof activeElement.focus === 'function') {
+      activeElement.focus({ preventScroll: true });
+    }
+  };
+
+  restore();
+  requestAnimationFrame(restore);
+}
+
+function renderJournalListPreservingScroll() {
+  preserveRecordsScroll(() => renderJournalList());
+}
+
+function refreshJournalFilterViewPreservingScroll() {
+  preserveRecordsScroll(() => {
+    updateJournalFilterControls();
+    renderJournalList();
+  });
 }
 
 function renderJournalList() {
@@ -2181,11 +4276,16 @@ function renderJournalList() {
     });
 
     const title = document.createElement('strong');
+    title.className = 'journal-item-title';
     title.innerHTML = '';
-    title.append(document.createTextNode(journalDisplayDate(journal)));
+    const dateText = document.createElement('span');
+    dateText.className = 'journal-item-date';
+    dateText.textContent = journalDisplayDate(journal);
+    title.appendChild(dateText);
     const tagBadge = createJournalTagBadge(journal.tagId);
     if (tagBadge) title.appendChild(tagBadge);
     const preview = document.createElement('span');
+    preview.className = 'journal-item-preview';
     preview.textContent = journal.content || '这一天还没有填写生活记录。';
     item.append(title, preview);
     journalList.appendChild(item);
@@ -2231,8 +4331,7 @@ function cycleJournalFilterMode() {
     journalFilterMode = 'all';
   }
 
-  updateJournalFilterControls();
-  renderJournalList();
+  refreshJournalFilterViewPreservingScroll();
 }
 
 function createJournalTagBadge(tagId) {
@@ -2241,8 +4340,8 @@ function createJournalTagBadge(tagId) {
   const badge = document.createElement('span');
   badge.className = 'journal-tag-badge';
   badge.style.background = tag.color;
-  badge.title = tag.fullName;
-  badge.textContent = tag.shortName;
+  badge.title = `${tag.shortName}：${tag.fullName}`;
+  badge.setAttribute('aria-label', badge.title);
   return badge;
 }
 
@@ -2346,10 +4445,6 @@ function inferTaskType(title) {
   return '工作';
 }
 
-function normalizeTime(value) {
-  return value && /^\d{1,2}:\d{2}$/.test(value) ? value.padStart(5, '0') : '99:99';
-}
-
 function journalIdentity(journal) {
   return journalPrimaryDate(journal);
 }
@@ -2400,79 +4495,6 @@ function journalDateRange(journal) {
   };
 }
 
-function normalizeDate(value) {
-  const text = clean(value);
-  if (!text) return '';
-  const match = text.match(/^(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})日?$/);
-  if (!match) return text;
-  return `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`;
-}
-
-function isCompleteDate(value) {
-  const normalized = normalizeDate(value);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return false;
-  const [year, month, day] = normalized.split('-').map(Number);
-  const parsed = new Date(year, month - 1, day);
-  return parsed.getFullYear() === year
-    && parsed.getMonth() === month - 1
-    && parsed.getDate() === day;
-}
-
-function isSelectableDate(value) {
-  if (!isCompleteDate(value)) return false;
-  const normalized = normalizeDate(value);
-  const year = Number(normalized.slice(0, 4));
-  return year >= MIN_DATE_YEAR;
-}
-
-function enumerateDates(startDate, endDate) {
-  const start = parseLocalDate(startDate);
-  const end = parseLocalDate(endDate);
-  if (!start || !end || start > end) return [];
-
-  const dates = [];
-  const cursor = new Date(start);
-  while (cursor <= end) {
-    dates.push(formatLocalDate(cursor));
-    cursor.setDate(cursor.getDate() + 1);
-  }
-  return dates;
-}
-
-function extractTimeRangeFromInput(value) {
-  const match = formatTimeRangeInput(value).match(/^(\d{2}):(\d{2})-(\d{2}):(\d{2})$/);
-  if (!match) return null;
-  const startHour = Number(match[1]);
-  const startMinute = Number(match[2]);
-  const endHour = Number(match[3]);
-  const endMinute = Number(match[4]);
-  if (!isValidClockPart(startHour, startMinute) || !isValidClockPart(endHour, endMinute)) return null;
-
-  return {
-    startTime: `${match[1]}:${match[2]}`,
-    endTime: `${match[3]}:${match[4]}`
-  };
-}
-
-function formatTimeRangeInput(value) {
-  const digits = clean(value).replace(/\D/g, '').slice(0, 8);
-  if (!digits) return '';
-
-  if (digits.length < 2) return digits;
-  const startHour = digits.slice(0, 2);
-  if (digits.length === 2) return `${startHour}:`;
-  if (digits.length < 4) return `${startHour}:${digits.slice(2)}`;
-  const start = `${startHour}:${digits.slice(2, 4)}`;
-  if (digits.length === 4) return `${start}-`;
-  if (digits.length < 6) return `${start}-${digits.slice(4)}`;
-  if (digits.length === 6) return `${start}-${digits.slice(4, 6)}:`;
-  return `${start}-${digits.slice(4, 6)}:${digits.slice(6, 8)}`;
-}
-
-function isValidClockPart(hour, minute) {
-  return hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59;
-}
-
 function normalizeWeekday(value) {
   const text = clean(value);
   if (!text) return '';
@@ -2484,46 +4506,6 @@ function normalizeWeekday(value) {
   if (/周六|星期六|sat/i.test(text)) return '周六';
   if (/周日|周天|星期日|星期天|sun/i.test(text)) return '周日';
   return '';
-}
-
-function parseLocalDate(date) {
-  const normalized = normalizeDate(date);
-  if (!isSelectableDate(normalized)) return null;
-  const [year, month, day] = normalized.split('-').map(Number);
-  return new Date(year, month - 1, day);
-}
-
-function shiftDate(date, offsetDays) {
-  const parsed = parseLocalDate(date);
-  if (!parsed) return '';
-  parsed.setDate(parsed.getDate() + offsetDays);
-  return formatLocalDate(parsed);
-}
-
-function weekdayFromDate(date) {
-  const parsed = parseLocalDate(date);
-  if (!parsed) return '';
-  return ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][parsed.getDay()];
-}
-
-function formatLocalDate(date) {
-  return [
-    date.getFullYear(),
-    String(date.getMonth() + 1).padStart(2, '0'),
-    String(date.getDate()).padStart(2, '0')
-  ].join('-');
-}
-
-function formatClockDate(date) {
-  return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
-}
-
-function formatClockTime(date) {
-  return [
-    String(date.getHours()).padStart(2, '0'),
-    String(date.getMinutes()).padStart(2, '0'),
-    String(date.getSeconds()).padStart(2, '0')
-  ].join(':');
 }
 
 function taskIdentity(task) {
@@ -2597,11 +4579,6 @@ function statusClass(status) {
   if (status === '部分完成') return 'partial';
   if (status === '未完成') return 'missed';
   return 'pending';
-}
-
-function sourceLabel(sourceType) {
-  if (sourceType === 'table') return '表格解析';
-  return '文件导入';
 }
 
 function pageTitleFor(page) {
@@ -2687,10 +4664,6 @@ function journalTagById(tagId) {
 function normalizeJournalTagId(value) {
   const tagId = clean(value);
   return journalTagById(tagId) ? tagId : '';
-}
-
-function legacyRatingToTagId(value) {
-  return LEGACY_RATING_TO_TAG_ID[clean(value)] || '';
 }
 
 function buildTagOptionText(tag) {
@@ -2886,6 +4859,7 @@ async function initializeAppData() {
     };
     const migratedProfile = migrateProfileDefaults(profile);
     profile = migratedProfile.profile;
+    const migratedTasks = normalizeTaskDayBoundaries();
     journals = normalizeJournalCollection(result.data.journals || []);
     storagePaths = result.paths || storagePaths;
     setDateInputValue(journalViewDate, latestJournalDate() || journalDate.value || formatLocalDate(new Date()));
@@ -2893,7 +4867,7 @@ async function initializeAppData() {
     populateJournalTagSelects();
     renderJournalTagSettings();
     await migrateLegacyLocalStorageIfNeeded();
-    if (migratedProfile.changed) await saveState();
+    if (migratedProfile.changed || migratedTasks.changed) await saveState();
     updateStoragePathView();
     renderAll();
     if (pages.tasks.classList.contains('active')) {
@@ -3099,6 +5073,7 @@ async function deleteSelectedDay() {
 function updateStoragePathView() {
   dataFilePath.textContent = storagePaths.dataFilePath || '尚未生成';
   settingsFilePath.textContent = storagePaths.settingsFilePath || '尚未生成';
+  if (modelDownloadPath) modelDownloadPath.textContent = asrModelDownloadDirectory || '加载中...';
 }
 
 function clearLegacyLocalStorage() {
@@ -3126,6 +5101,13 @@ function clean(value) {
 async function startApp() {
   await applyAppIcon();
   await applyAppVersion();
+  void refreshAsrModelStatus();
+  void refreshAudioInputDevices();
+  if (navigator.mediaDevices && typeof navigator.mediaDevices.addEventListener === 'function') {
+    navigator.mediaDevices.addEventListener('devicechange', () => {
+      if (!microphoneTestRecording && !asrTestRecording) void refreshAudioInputDevices();
+    });
+  }
   const today = formatLocalDate(new Date());
   setDateInputValue(journalDate, today);
   setDateInputValue(taskDateFilter, today);

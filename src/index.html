@@ -44,9 +44,12 @@
 
       <main class="main">
         <header class="topbar">
-          <div>
+          <div class="page-heading">
             <p class="eyebrow">日织</p>
-            <h1 id="pageTitle">任务</h1>
+            <div class="page-title-row">
+              <h1 id="pageTitle">任务</h1>
+              <span id="settingsAsrDownloadProgress" class="settings-asr-download-progress hidden" role="status"></span>
+            </div>
           </div>
           <div class="topbar-actions">
             <div class="clock">
@@ -135,7 +138,7 @@
 
         <section id="recordsPage" class="page">
           <div class="records-layout">
-            <section class="panel journal-editor">
+            <section class="panel journal-editor" id="journalEditorPanel">
               <div class="section-head">
                 <div>
                   <h2>每日生活记录</h2>
@@ -165,18 +168,31 @@
 
               <textarea id="journalContent" class="journal-textarea" placeholder="例如：今天上午工作比较顺，下午有些疲惫，晚上运动后状态恢复。"></textarea>
 
+              <div class="journal-voice-input" aria-live="polite">
+                <div class="journal-voice-controls">
+                  <button id="journalVoiceStartButton" class="secondary-button journal-voice-button" type="button">🎤 语音输入</button>
+                  <button id="journalVoiceCancelButton" class="secondary-button hidden" type="button">取消本次输入</button>
+                  <span id="journalVoiceTimer" class="journal-voice-timer hidden" aria-live="polite"></span>
+                  <span id="journalVoiceStatus" class="journal-voice-status">已识别的语音段会直接插入文本框，仍需手动保存记录。</span>
+                </div>
+              </div>
+
               <div class="journal-actions">
                 <span id="journalSaveState" class="muted">尚未保存</span>
-                <button id="saveJournalButton" class="primary-button">保存记录</button>
+                <div class="journal-action-buttons">
+                  <button id="showJournalListButton" class="secondary-button" type="button">查看记录列表</button>
+                  <button id="saveJournalButton" class="primary-button">保存记录</button>
+                </div>
               </div>
             </section>
 
-            <section class="panel records-list-panel">
+            <section class="panel records-list-panel hidden" id="recordsListPanel">
               <div class="section-head">
                 <div>
                   <h2>记录列表</h2>
                 </div>
                 <div class="record-filter">
+                  <button id="backToJournalEditorButton" class="secondary-button" type="button">返回填写</button>
                   <button id="journalFilterModeButton" class="secondary-button filter-mode-button" type="button">显示全部</button>
                   <label id="journalViewDateField" class="date-picker hidden">
                     <span>查看日期</span>
@@ -205,92 +221,188 @@
 
         <section id="settingsPage" class="page">
           <div class="settings-layout">
-            <section class="panel settings-data-panel">
-              <h2>数据文件</h2>
-              <p class="muted">任务安排和每日记录会按月写入本地 JSON 文件，命名为 rizhi-data-YYYY-MM.json。你可以自己选择保存文件夹，方便归档、备份或迁移。</p>
+            <aside class="panel settings-menu-panel" aria-label="设置目录">
+              <h2>设置目录</h2>
+              <p class="muted">选择左侧项目后，在右侧查看和修改具体设置。</p>
+              <div class="settings-menu">
+                <button class="settings-menu-item" type="button" data-settings-panel="data">数据文件</button>
+                <button class="settings-menu-item" type="button" data-settings-panel="danger">数据删除</button>
+                <button class="settings-menu-item" type="button" data-settings-panel="tags">标签</button>
+                <button class="settings-menu-item" type="button" data-settings-panel="reminders">周期设置</button>
+                <button class="settings-menu-item" type="button" data-settings-panel="asr-test">语音识别测试</button>
+              </div>
+            </aside>
 
-              <div class="path-list">
-                <div class="path-row">
-                  <span>当前月份数据文件</span>
-                  <div class="path-control">
-                    <code id="dataFilePath">加载中...</code>
+            <div class="settings-detail">
+              <section id="settingsEmptyPanel" class="panel settings-empty-panel">
+                <h2>选择设置项目</h2>
+                <p class="muted">设置项目会先以目录形式展示。点击左侧标题后，这里会显示对应的具体内容。</p>
+              </section>
+
+              <section class="panel settings-data-panel hidden" data-settings-panel="data">
+                <h2>数据文件</h2>
+                <p class="muted">任务安排和每日记录会按月写入本地 JSON 文件，命名为 rizhi-data-YYYY-MM.json。你可以自己选择保存文件夹，方便归档、备份或迁移。</p>
+
+                <div class="path-list">
+                  <div class="path-row">
+                    <span>当前月份数据文件</span>
+                    <div class="path-control">
+                      <code id="dataFilePath">加载中...</code>
+                      <div class="path-actions">
+                        <button id="chooseDataPathButton" class="secondary-button" type="button">更改</button>
+                        <button id="openDataPathButton" class="secondary-button" type="button">打开</button>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="path-row">
+                    <span>设置文件</span>
+                    <div class="path-control">
+                      <code id="settingsFilePath">加载中...</code>
+                      <div class="path-actions">
+                        <button id="changeSettingsPathButton" class="secondary-button" type="button" title="数据文件和设置文件会一起迁移">更改</button>
+                        <button id="openSettingsPathButton" class="secondary-button" type="button">打开</button>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="path-row">
+                    <span>模型下载地址</span>
+                    <div class="path-control">
+                      <code id="modelDownloadPath">加载中...</code>
+                      <div class="path-actions">
+                        <button id="openModelDirectoryButton" class="secondary-button" type="button">打开</button>
+                      </div>
+                    </div>
                   </div>
                 </div>
-                <div class="path-row">
-                  <span>设置文件</span>
-                  <div class="path-control">
-                    <code id="settingsFilePath">加载中...</code>
+              </section>
+
+              <section class="panel danger-panel hidden" data-settings-panel="danger">
+                <h2>数据删除</h2>
+                <p class="muted">可以删除某一天的全部安排和记录，也可以清空软件的全部本地数据。删除前都会二次确认。</p>
+                <label class="field compact-field">
+                  <span>删除日期</span>
+                  <div class="date-stepper">
+                    <input id="deleteDayDate" type="date" />
+                    <div class="date-stepper-buttons" aria-hidden="false">
+                      <button class="date-step-button date-step-up" type="button" data-date-step-for="deleteDayDate" data-date-step="-1" aria-label="前一天"></button>
+                      <button class="date-step-button date-step-down" type="button" data-date-step-for="deleteDayDate" data-date-step="1" aria-label="后一天"></button>
+                    </div>
                   </div>
-                </div>
-              </div>
-              <div class="storage-actions">
-                <button id="chooseDataPathButton" class="secondary-button" type="button">选择保存文件夹</button>
-                <button id="openDataPathButton" class="secondary-button" type="button">打开本地文件夹</button>
-              </div>
-            </section>
-
-            <section class="panel danger-panel">
-              <h2>数据删除</h2>
-              <p class="muted">可以删除某一天的全部安排和记录，也可以清空软件的全部本地数据。删除前都会二次确认。</p>
-              <label class="field compact-field">
-                <span>删除日期</span>
-                <div class="date-stepper">
-                  <input id="deleteDayDate" type="date" />
-                  <div class="date-stepper-buttons" aria-hidden="false">
-                    <button class="date-step-button date-step-up" type="button" data-date-step-for="deleteDayDate" data-date-step="-1" aria-label="前一天"></button>
-                    <button class="date-step-button date-step-down" type="button" data-date-step-for="deleteDayDate" data-date-step="1" aria-label="后一天"></button>
-                  </div>
-                </div>
-              </label>
-              <div class="delete-actions">
-                <button id="openDeleteDayButton" class="danger-button" type="button">删除当天数据</button>
-                <button id="openResetButton" class="danger-button" type="button">重置全部数据</button>
-              </div>
-            </section>
-
-            <section class="panel settings-tags-panel">
-              <h2>标签</h2>
-              <p class="muted">用纯色块给每日生活记录分类。简称用于列表和下拉选择，全称用于说明这个标签代表的日子含义。</p>
-              <div id="journalTagSettingsList" class="tag-settings-list"></div>
-              <button id="addJournalTagButton" class="secondary-button" type="button">新增标签</button>
-            </section>
-
-            <section class="panel settings-reminder-panel">
-              <h2>个人设置</h2>
-              <div class="reminder-rule-section">
-                <h3>课程提醒时间</h3>
-                <p class="muted">只用于标签为“课程”的任务，用来计算上课、下课和课间提醒。</p>
-                <div class="profile-settings-grid">
-                  <label class="field">
-                    <span>每节课程时间</span>
-                    <input id="classDuration" type="number" min="10" step="5" value="50" />
-                  </label>
-                  <label class="field">
-                    <span>课间时间</span>
-                    <input id="classBreakLength" type="number" min="1" step="1" value="10" />
-                  </label>
-                </div>
-              </div>
-
-              <div class="reminder-rule-section">
-                <h3>工作/学习提醒时间</h3>
-                <p class="muted">只用于标签为“工作”和“学习”的任务，用来计算专注和休息提醒。</p>
-                <div class="profile-settings-grid">
-                  <label class="field">
-                    <span>一次专注时长</span>
-                    <input id="workFocusLength" type="number" min="10" step="5" value="50" />
-                  </label>
-                  <label class="field">
-                    <span>休息时长</span>
-                    <input id="workBreakLength" type="number" min="1" step="1" value="10" />
-                  </label>
-                </div>
-                <label class="toggle-row">
-                  <input id="breakReminder" type="checkbox" checked />
-                  <span>长时间工作或学习后提醒活动身体、远眺放松</span>
                 </label>
-              </div>
-            </section>
+                <div class="delete-actions">
+                  <button id="openDeleteDayButton" class="danger-button" type="button">删除当天数据</button>
+                  <button id="openResetButton" class="danger-button" type="button">重置全部数据</button>
+                </div>
+              </section>
+
+              <section class="panel settings-tags-panel hidden" data-settings-panel="tags">
+                <h2>标签</h2>
+                <p class="muted">用纯色块给每日生活记录分类。简称用于列表和下拉选择，全称用于说明这个标签代表的日子含义。</p>
+                <div id="journalTagSettingsList" class="tag-settings-list"></div>
+                <button id="addJournalTagButton" class="secondary-button" type="button">新增标签</button>
+              </section>
+
+              <section class="panel settings-reminder-panel hidden" data-settings-panel="reminders">
+                <h2>周期设置</h2>
+                <div class="reminder-rule-section">
+                  <h3>课程提醒时间</h3>
+                  <p class="muted">只用于标签为“课程”的任务，用来计算上课、下课和课间提醒。</p>
+                  <div class="profile-settings-grid">
+                    <label class="field">
+                      <span>每节课程时间</span>
+                      <input id="classDuration" type="number" min="10" step="5" value="50" />
+                    </label>
+                    <label class="field">
+                      <span>课间时间</span>
+                      <input id="classBreakLength" type="number" min="1" step="1" value="10" />
+                    </label>
+                  </div>
+                </div>
+
+                <div class="reminder-rule-section">
+                  <h3>工作/学习提醒时间</h3>
+                  <p class="muted">只用于标签为“工作”和“学习”的任务，用来计算专注和休息提醒。</p>
+                  <div class="profile-settings-grid">
+                    <label class="field">
+                      <span>一次专注时长</span>
+                      <input id="workFocusLength" type="number" min="10" step="5" value="50" />
+                    </label>
+                    <label class="field">
+                      <span>休息时长</span>
+                      <input id="workBreakLength" type="number" min="1" step="1" value="10" />
+                    </label>
+                  </div>
+                  <label class="toggle-row">
+                    <input id="breakReminder" type="checkbox" checked />
+                    <span>长时间工作或学习后提醒活动身体、远眺放松</span>
+                  </label>
+                </div>
+              </section>
+
+              <section class="panel settings-asr-test-panel hidden" data-settings-panel="asr-test">
+                <h2>本地语音识别测试</h2>
+                <p class="muted">识别时只使用本机麦克风、已安装的 Qwen3-ASR 模型和本地 WebAssembly，不会写入任务或每日记录，也不会联网。首次安装模型时才会连接官方下载源。</p>
+                <section class="asr-model-status" aria-labelledby="asrModelStatusTitle">
+                  <div>
+                    <h3 id="asrModelStatusTitle">离线语音模型</h3>
+                    <p id="asrModelStatus" class="asr-model-status-text" role="status">正在检查模型安装状态…</p>
+                  </div>
+                  <button id="asrModelDownloadButton" class="secondary-button" type="button">下载模型</button>
+                </section>
+                <div class="asr-device-row">
+                  <label class="field asr-device-field" for="asrInputDeviceSelect">
+                    <span>语音输入设备</span>
+                    <select id="asrInputDeviceSelect" aria-describedby="asrDeviceHelp"></select>
+                  </label>
+                  <button id="asrRefreshDevicesButton" class="secondary-button" type="button">刷新设备</button>
+                </div>
+                <p id="asrDeviceHelp" class="muted asr-device-help">首次授权麦克风后会显示完整设备名称。</p>
+                <section class="asr-input-monitor" aria-labelledby="asrInputMonitorTitle">
+                  <div class="asr-input-monitor-head">
+                    <div>
+                      <h3 id="asrInputMonitorTitle">输入音频波形</h3>
+                      <p class="muted">麦克风测试和语音识别录音都会在这里显示当前输入音频。</p>
+                    </div>
+                  </div>
+                  <canvas id="asrInputWaveform" class="asr-input-waveform" aria-label="输入音频实时波形"></canvas>
+                  <p id="asrInputFeedback" class="asr-input-feedback" role="status">尚未开始音频输入。</p>
+                </section>
+                <div class="asr-capture-mode-grid">
+                <section class="asr-microphone-test" aria-labelledby="asrMicrophoneTestTitle">
+                  <div class="asr-microphone-test-head">
+                    <div>
+                      <h3 id="asrMicrophoneTestTitle">麦克风测试</h3>
+                      <p class="muted">只显示输入波形和工作状态；不会加载模型、不会发送给识别服务，也不会保存文件。</p>
+                    </div>
+                    <div class="asr-test-controls">
+                      <button id="asrMicTestStartButton" class="secondary-button" type="button">开始麦克风测试</button>
+                      <button id="asrMicTestStopButton" class="secondary-button" type="button" disabled>停止测试</button>
+                    </div>
+                  </div>
+                </section>
+                  <section class="asr-recognition-run" aria-labelledby="asrRecognitionRunTitle">
+                    <h3 id="asrRecognitionRunTitle">语音识别录音</h3>
+                    <p class="muted">使用上方所选设备进行本地识别。</p>
+                    <div class="asr-test-controls">
+                      <button id="asrTestStartButton" class="primary-button" type="button">开始录音</button>
+                      <button id="asrTestStopButton" class="secondary-button" type="button" disabled>停止并识别</button>
+                    </div>
+                    <p id="asrTestStatus" class="asr-test-status" role="status">尚未开始。首次启动会在后台加载本地模型。</p>
+                    <div class="asr-test-results">
+                      <div>
+                        <span>部分识别</span>
+                        <p id="asrPartialResult">—</p>
+                      </div>
+                      <div>
+                        <span>最终文本</span>
+                        <p id="asrFinalResult">—</p>
+                      </div>
+                    </div>
+                  </section>
+                </div>
+              </section>
+
+            </div>
           </div>
         </section>
       </main>
@@ -316,7 +428,7 @@
           <span id="resetConfirmText">我确认删除这些日织数据</span>
         </label>
 
-        <div class="modal-actions">
+        <div class="modal-actions hidden" aria-hidden="true">
           <button id="cancelResetButton" class="secondary-button" type="button">取消</button>
           <button id="confirmResetButton" class="danger-button" type="button" disabled>确认重置</button>
         </div>
@@ -410,7 +522,7 @@
           </label>
         </div>
 
-        <div class="editable-table-wrap">
+        <div class="editable-table-wrap hidden" aria-hidden="true">
           <table class="editable-table">
             <thead>
               <tr>
@@ -439,35 +551,56 @@
     </div>
 
     <div id="dailyPlanTableModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="dailyPlanTableTitle">
-      <div class="modal-card table-modal-card">
-        <div class="modal-header">
-          <div>
-            <p class="eyebrow">手动安排</p>
-            <h2 id="dailyPlanTableTitle">填写每日安排</h2>
+      <div class="modal-card table-modal-card daily-plan-modal-card">
+        <section id="dailyPlanLaunchPanel" class="daily-plan-launch-panel" aria-labelledby="dailyPlanTableTitle">
+          <div class="modal-header">
+            <div>
+              <h2 id="dailyPlanTableTitle">创建任务</h2>
+            </div>
+            <button id="closeDailyPlanVoicePageButton" class="icon-button" aria-label="关闭">×</button>
           </div>
-          <label class="single-day-toggle">
-            <input id="dailyPlanSingleDay" type="checkbox" checked />
-            <span>单日</span>
-          </label>
-          <button id="closeDailyPlanTableModalButton" class="icon-button" aria-label="关闭">×</button>
-        </div>
 
-        <div id="dailyPlanSingleDateRow" class="term-range daily-date-range">
-          <label class="field">
-            <span>日期</span>
-            <input id="dailyPlanDate" type="date" />
-          </label>
-        </div>
-        <div id="dailyPlanRangeRow" class="term-range daily-date-range hidden">
-          <label class="field">
-            <span>开始日期</span>
-            <input id="dailyPlanStartDate" type="date" />
-          </label>
-          <label class="field">
-            <span>结束日期</span>
-            <input id="dailyPlanEndDate" type="date" />
-          </label>
-        </div>
+          <div class="daily-plan-date-toolbar">
+            <div id="dailyPlanSingleDateRow" class="term-range daily-date-range">
+              <label class="field">
+                <span>日期</span>
+                <div class="date-stepper">
+                  <input id="dailyPlanDate" type="date" />
+                  <div class="date-stepper-buttons" aria-hidden="false">
+                    <button class="date-step-button date-step-up" type="button" data-date-step-for="dailyPlanDate" data-date-step="-1" aria-label="前一天"></button>
+                    <button class="date-step-button date-step-down" type="button" data-date-step-for="dailyPlanDate" data-date-step="1" aria-label="后一天"></button>
+                  </div>
+                </div>
+              </label>
+            </div>
+            <div id="dailyPlanRangeRow" class="term-range daily-date-range hidden" aria-hidden="true">
+              <label class="field">
+                <span>开始日期</span>
+                <div class="date-stepper">
+                  <input id="dailyPlanStartDate" type="date" />
+                  <div class="date-stepper-buttons" aria-hidden="false">
+                    <button class="date-step-button date-step-up" type="button" data-date-step-for="dailyPlanStartDate" data-date-step="-1" aria-label="前一天"></button>
+                    <button class="date-step-button date-step-down" type="button" data-date-step-for="dailyPlanStartDate" data-date-step="1" aria-label="后一天"></button>
+                  </div>
+                </div>
+              </label>
+              <label class="field">
+                <span>结束日期</span>
+                <div class="date-stepper">
+                  <input id="dailyPlanEndDate" type="date" />
+                  <div class="date-stepper-buttons" aria-hidden="false">
+                    <button class="date-step-button date-step-up" type="button" data-date-step-for="dailyPlanEndDate" data-date-step="-1" aria-label="前一天"></button>
+                    <button class="date-step-button date-step-down" type="button" data-date-step-for="dailyPlanEndDate" data-date-step="1" aria-label="后一天"></button>
+                  </div>
+                </div>
+              </label>
+            </div>
+            <label class="daily-plan-multi-day-toggle">
+              <input id="dailyPlanMultiDay" type="checkbox" />
+              <span>多日</span>
+            </label>
+            <button id="openDailyPlanVoicePageButton" class="primary-button daily-plan-voice-entry" type="button">🎤 语音创建任务</button>
+          </div>
 
         <div class="editable-table-wrap">
           <table class="editable-table daily-table">
@@ -477,18 +610,49 @@
                 <th>任务</th>
                 <th>具体内容</th>
                 <th>标签</th>
+                <th class="row-action-heading" aria-label="操作"></th>
               </tr>
             </thead>
             <tbody id="dailyPlanTableBody"></tbody>
           </table>
         </div>
 
-        <button id="addDailyPlanRowButton" class="add-table-row" type="button">+</button>
+        <button id="addDailyPlanRowButton" class="add-table-row" type="button" aria-label="新增空白任务条目">+</button>
 
         <div class="modal-actions">
           <button id="cancelDailyPlanTableButton" class="secondary-button" type="button">取消</button>
           <button id="saveDailyPlanTableButton" class="primary-button" type="button">确定安排</button>
         </div>
+        </section>
+
+        <section id="dailyPlanVoicePage" class="hidden" aria-labelledby="dailyPlanVoicePageTitle">
+          <div class="modal-header">
+            <div>
+              <h2 id="dailyPlanVoicePageTitle">语音创建任务</h2>
+            </div>
+            <button id="backDailyPlanVoicePageButton" class="secondary-button" type="button">返回</button>
+          </div>
+
+          <section class="daily-plan-voice" aria-labelledby="dailyPlanVoiceTitle">
+            <div class="daily-plan-voice-head">
+              <h3 id="dailyPlanVoiceTitle">语音创建任务</h3>
+              <p class="muted">识别文字可以修改。解析后会转换成标准的逐行任务文本，点击“确定”后回填到创建任务页。</p>
+            </div>
+            <p id="dailyPlanVoiceStatus" class="daily-plan-voice-status" role="status">尚未开始语音识别。</p>
+            <p class="daily-plan-voice-format">建议语音格式：在“开始时间”到“结束时间”，“任务标题”，“具体任务内容”。</p>
+            <div class="daily-plan-voice-actions">
+              <span id="dailyPlanVoiceTimer" class="journal-voice-timer hidden" aria-live="polite"></span>
+              <button id="dailyPlanVoiceStartButton" class="secondary-button" type="button">开始录音</button>
+              <button id="dailyPlanVoiceCancelButton" class="secondary-button hidden" type="button">取消录音</button>
+              <button id="dailyPlanVoiceConfirmButton" class="secondary-button" type="button">解析</button>
+              <button id="dailyPlanVoiceApplyButton" class="primary-button" type="button">确定</button>
+            </div>
+            <label class="field daily-plan-voice-text-field">
+              <span>识别文字（可编辑）</span>
+              <textarea id="dailyPlanVoiceText" rows="8" placeholder="语音识别完成后会显示在这里，你可以修改后再解析。"></textarea>
+            </label>
+          </section>
+        </section>
       </div>
     </div>
 
@@ -510,6 +674,26 @@
       </div>
     </div>
 
+    <div id="journalUnsavedModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="journalUnsavedTitle">
+      <div class="modal-card small-modal">
+        <div class="modal-header">
+          <div>
+            <p class="eyebrow">未保存内容</p>
+            <h2 id="journalUnsavedTitle">编辑内容未保存，是否保存？</h2>
+          </div>
+          <button id="closeJournalUnsavedModalButton" class="icon-button" aria-label="关闭">×</button>
+        </div>
+
+        <p class="muted">继续前可以先保存，也可以放弃这次编辑。</p>
+
+        <div class="modal-actions">
+          <button id="saveJournalBeforeLeaveButton" class="primary-button" type="button">保存</button>
+          <button id="discardJournalChangesButton" class="secondary-button" type="button">不保存</button>
+          <button id="cancelJournalNavigationButton" class="secondary-button" type="button">取消</button>
+        </div>
+      </div>
+    </div>
+
     <div id="tutorialConfirmModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="tutorialConfirmTitle">
       <div class="modal-card small-modal">
         <div class="modal-header">
@@ -520,7 +704,7 @@
           <button id="tutorialConfirmNoButton" class="icon-button" aria-label="关闭">×</button>
         </div>
 
-        <p class="muted">教程会依次介绍批量创建任务、记录列表、自律统计、数据文件、标签、周期设置和定位按钮。</p>
+        <p class="muted">教程会依次介绍批量创建任务、每日生活记录、记录列表、自律统计、数据文件、标签、周期设置和定位按钮。</p>
 
         <div class="modal-actions">
           <button id="tutorialNoButton" class="secondary-button" type="button">否</button>
@@ -552,6 +736,10 @@
       </section>
     </div>
 
+    <script src="./shared/dateUtils.js"></script>
+    <script src="./shared/taskTimeUtils.js"></script>
+    <script src="./shared/journalTags.js"></script>
+    <script src="./asr/audioCapture.js"></script>
     <script src="./renderer.js"></script>
   </body>
 </html>

@@ -1,3 +1,5 @@
+const { collapseRepeatedText } = require('./textUtils');
+
 function parseScheduleText(text, idPrefix = 'text') {
   const lines = String(text || '')
     .replace(/\r/g, '\n')
@@ -53,22 +55,6 @@ function extractTitle(rawText, startTime, endTime) {
     .trim();
 
   return collapseRepeatedText(title);
-}
-
-function collapseRepeatedText(value) {
-  const text = String(value || '').trim();
-  if (!text) return '';
-
-  for (let length = 2; length <= Math.floor(text.length / 2); length += 1) {
-    const chunk = text.slice(0, length).trim();
-    if (!chunk) continue;
-    const repeated = `${chunk}${chunk}`;
-    if (text.replace(/\s+/g, '') === repeated.replace(/\s+/g, '')) {
-      return chunk;
-    }
-  }
-
-  return text.replace(/^(.+?)\s+\1$/u, '$1').trim();
 }
 
 function extractDate(text) {

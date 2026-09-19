@@ -177,6 +177,26 @@ button {
   margin-bottom: 24px;
 }
 
+.page-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.settings-asr-download-progress {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 4px 11px;
+  border-radius: 999px;
+  background: #e7f7ed;
+  color: #16724e;
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
 .topbar-actions {
   display: flex;
   align-items: center;
@@ -451,6 +471,198 @@ h2 {
   white-space: nowrap;
 }
 
+.asr-test-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 18px 0 10px;
+}
+
+.asr-model-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fafbfc;
+}
+
+.asr-model-status h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+
+.asr-model-status-text {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.asr-model-status-text.is-ready {
+  color: #16724e;
+}
+
+.asr-model-status-text.is-error {
+  color: #b42318;
+}
+
+.asr-device-row {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.asr-device-field {
+  min-width: min(420px, 100%);
+  margin: 0;
+  flex: 1 1 320px;
+}
+
+.asr-device-help {
+  margin: 8px 0 0;
+  font-size: 13px;
+}
+
+.asr-input-monitor {
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fafbfc;
+}
+
+.asr-input-monitor-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 20px;
+}
+
+.asr-input-monitor h3,
+.asr-microphone-test h3,
+.asr-recognition-run h3 {
+  margin: 0 0 6px;
+  font-size: 16px;
+}
+
+.asr-input-monitor .muted,
+.asr-microphone-test .muted,
+.asr-recognition-run .muted {
+  margin: 0;
+}
+
+.asr-capture-mode-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.78fr) minmax(0, 1.22fr);
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.asr-microphone-test,
+.asr-recognition-run {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fafbfc;
+}
+
+.asr-microphone-test-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 20px;
+}
+
+.asr-microphone-test .asr-test-controls,
+.asr-recognition-run .asr-test-controls {
+  margin: 0;
+}
+
+.asr-input-waveform {
+  display: block;
+  width: 100%;
+  height: 96px;
+  margin-top: 14px;
+  border: 1px solid #dbe2e8;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.asr-input-feedback {
+  display: inline-flex;
+  margin: 10px 0 0;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #eef1f4;
+  color: #4a5968;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.asr-input-feedback.is-active {
+  background: #e7f7ed;
+  color: #16724e;
+}
+
+.asr-input-feedback.is-warning {
+  background: #fff3dc;
+  color: #9a5b00;
+}
+
+@media (max-width: 860px) {
+  .asr-capture-mode-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.asr-test-status {
+  min-height: 24px;
+  margin: 0 0 14px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.asr-test-status.is-error {
+  color: #b42318;
+  font-weight: 700;
+}
+
+.asr-test-results {
+  display: grid;
+  gap: 10px;
+}
+
+.asr-test-results > div {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fafbfc;
+}
+
+.asr-test-results span {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.asr-test-results p {
+  min-height: 24px;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 #tutorialButton.tutorial-button {
   display: grid;
   width: var(--topbar-control-size);
@@ -491,12 +703,12 @@ h2 {
   grid-template-columns: 190px 1fr 156px;
   gap: 16px;
   align-items: stretch;
-  min-height: 176px;
-  padding: 24px 26px 30px 18px;
+  min-height: 140px;
+  padding: 14px 26px 14px 18px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface);
-  overflow: visible;
+  overflow: hidden;
 }
 
 .task-card.task-past {
@@ -557,6 +769,7 @@ h2 {
   display: grid;
   gap: 6px;
   align-content: center;
+  min-width: 0;
 }
 
 .inline-field {
@@ -612,15 +825,16 @@ h2 {
 .task-plan-input {
   width: 100%;
   max-width: 100%;
-  height: 58px;
-  min-height: 58px;
-  max-height: 96px;
-  resize: vertical;
-  padding: 7px 8px;
+  height: 36px;
+  min-height: 36px;
+  max-height: 36px;
+  resize: none;
+  padding: 6px 8px;
   color: var(--muted);
   font-size: 13px;
-  line-height: 1.6;
-  overflow: auto;
+  line-height: 22px;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .task-meta,
@@ -690,6 +904,7 @@ h2 {
   gap: 8px;
   align-items: center;
   align-self: center;
+  min-width: 0;
 }
 
 .task-action-button {
@@ -733,7 +948,7 @@ h2 {
   grid-column: 2;
   grid-row: 1;
   width: 34px;
-  height: 76px;
+  height: 34px;
   place-items: center;
   border: 1px solid #dfe3e8;
   border-radius: 8px;
@@ -1034,23 +1249,85 @@ h2 {
   gap: 16px;
   height: 100%;
   min-height: 0;
-  overflow-y: auto;
+  overflow: hidden;
   padding-right: 6px;
+}
+
+.records-layout.is-list-view {
+  overflow-y: auto;
+}
+
+.journal-editor {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.records-layout.is-editor-view .journal-editor {
+  height: 100%;
 }
 
 .settings-layout {
   display: grid;
-  grid-template-columns: minmax(420px, 1fr) minmax(300px, 420px);
+  grid-template-columns: 240px minmax(0, 1fr);
   gap: 16px;
   height: 100%;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   padding-right: 6px;
 }
 
-.settings-reminder-panel,
+.settings-menu-panel {
+  align-self: start;
+}
+
+.settings-menu-panel h2 {
+  margin-bottom: 8px;
+}
+
+.settings-menu {
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.settings-menu-item {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid #d8dee5;
+  border-radius: 8px;
+  background: #fbfcfd;
+  color: #24303b;
+  font-weight: 700;
+  text-align: left;
+}
+
+.settings-menu-item:hover,
+.settings-menu-item.active {
+  border-color: var(--accent);
+  background: #edf8f1;
+  color: var(--accent-dark);
+}
+
+.settings-detail {
+  display: grid;
+  align-content: start;
+  min-width: 0;
+  overflow-x: hidden;
+  gap: 16px;
+}
+
 .settings-tags-panel {
-  grid-column: 1 / -1;
+  width: min(100%, 880px);
+  overflow-x: hidden;
+}
+
+.settings-empty-panel {
+  min-height: 220px;
+  display: grid;
+  align-content: center;
 }
 
 .panel {
@@ -1287,32 +1564,34 @@ h2 {
 }
 
 .journal-tag-badge {
-  display: inline-flex;
-  min-width: 22px;
-  height: 22px;
-  align-items: center;
-  justify-content: center;
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
   margin-left: 8px;
-  padding: 0 6px;
-  border-radius: 6px;
-  color: #ffffff;
-  font-size: 12px;
-  font-weight: 800;
-  line-height: 1;
-  vertical-align: middle;
+  padding: 0;
+  border: 1px solid rgba(24, 33, 43, 0.16);
+  border-radius: 4px;
+  vertical-align: -1px;
 }
 
 .tag-settings-list {
   display: grid;
   gap: 10px;
   margin: 18px 0 14px;
+  min-width: 0;
 }
 
 .tag-settings-row {
   display: grid;
-  grid-template-columns: 48px minmax(120px, 180px) minmax(360px, 1fr) 34px;
+  grid-template-columns: 48px minmax(96px, 160px) minmax(0, 1fr) 40px;
   align-items: center;
   gap: 10px;
+  min-width: 0;
+}
+
+.tag-settings-row > * {
+  min-width: 0;
 }
 
 .tag-settings-row input[type="color"] {
@@ -1345,7 +1624,10 @@ h2 {
 .journal-textarea {
   width: 100%;
   min-height: 230px;
-  resize: vertical;
+  flex: 1 1 auto;
+  min-height: 0;
+  resize: none;
+  overflow-y: auto;
   padding: 14px;
   border: 1px solid #cfd5dc;
   border-radius: 8px;
@@ -1353,6 +1635,241 @@ h2 {
   color: var(--text);
   font: inherit;
   line-height: 1.7;
+}
+
+.journal-voice-input {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid #e0e5ea;
+  border-radius: 8px;
+  background: #fafbfc;
+}
+
+.journal-voice-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.journal-voice-button {
+  min-width: 118px;
+}
+
+.journal-voice-timer {
+  white-space: nowrap;
+  color: #426277;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.journal-voice-status {
+  display: inline-flex;
+  flex: 1 1 220px;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #edf1f4;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.journal-voice-status.is-active {
+  background: #e7f7ed;
+  color: #16724e;
+}
+
+.journal-voice-status.is-warning {
+  background: #fff3dc;
+  color: #9a5b00;
+}
+
+.journal-voice-status.is-error {
+  color: #b42318;
+  background: #feeceb;
+  font-weight: 700;
+}
+
+.daily-plan-date-toolbar {
+  display: flex;
+  align-items: end;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.daily-plan-date-toolbar .daily-date-range {
+  flex: 0 1 auto;
+  margin: 0;
+}
+
+#dailyPlanSingleDateRow {
+  grid-template-columns: minmax(260px, 330px);
+}
+
+#dailyPlanRangeRow {
+  grid-template-columns: repeat(2, minmax(220px, 280px));
+}
+
+.daily-plan-multi-day-toggle {
+  display: inline-flex;
+  height: 44px;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 0 8px;
+  color: #35404a;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.daily-plan-multi-day-toggle input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+}
+
+.daily-plan-voice-entry {
+  flex: 0 0 auto;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.daily-plan-voice {
+  display: grid;
+  grid-template-columns: minmax(320px, 5fr) minmax(0, 8fr);
+  grid-template-areas:
+    "head text"
+    "status text"
+    "format text"
+    "controls text";
+  column-gap: 18px;
+  row-gap: 12px;
+  margin: 16px 0 0;
+  padding: 16px;
+  border: 1px solid #dce4ea;
+  border-radius: 10px;
+  background: #fafcfd;
+}
+
+.daily-plan-voice-head {
+  grid-area: head;
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  min-width: 0;
+}
+
+.daily-plan-voice-actions {
+  grid-area: controls;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: center;
+  gap: 10px;
+}
+
+#dailyPlanVoiceStartButton,
+#dailyPlanVoiceConfirmButton,
+#dailyPlanVoiceApplyButton {
+  width: 100%;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+#dailyPlanVoiceStartButton {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+#dailyPlanVoiceConfirmButton {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+#dailyPlanVoiceApplyButton {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+.daily-plan-voice-actions .journal-voice-timer {
+  grid-column: 1 / -1;
+  grid-row: 2;
+}
+
+#dailyPlanVoiceCancelButton {
+  grid-column: 1 / -1;
+  grid-row: 3;
+  justify-self: start;
+}
+
+.daily-plan-voice h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.daily-plan-voice-head .muted {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.daily-plan-voice-status {
+  grid-area: status;
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.daily-plan-voice-status.is-error {
+  color: #b42318;
+  font-weight: 700;
+}
+
+.daily-plan-voice-status.is-warning {
+  color: #9a5b00;
+  font-weight: 700;
+}
+
+.daily-plan-voice-format {
+  grid-area: format;
+  margin: 0;
+  color: #426277;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.daily-plan-voice-text-field {
+  grid-area: text;
+  display: grid;
+  grid-template-rows: auto minmax(250px, 1fr);
+  align-self: stretch;
+  min-width: 0;
+}
+
+.daily-plan-voice-text-field textarea {
+  width: 100%;
+  min-height: 250px;
+  height: 100%;
+  resize: vertical;
+  line-height: 1.65;
+}
+
+.journal-voice-preview {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  margin: 10px 0 0;
+  padding-top: 10px;
+  border-top: 1px dashed #d9e0e6;
+  color: #495665;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.journal-voice-preview > span:first-child {
+  color: var(--muted);
+  font-weight: 700;
 }
 
 .detail-textarea {
@@ -1374,6 +1891,13 @@ h2 {
   justify-content: space-between;
   gap: 16px;
   margin-top: 14px;
+}
+
+.journal-action-buttons {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 .journal-list {
@@ -1420,7 +1944,17 @@ h2 {
   border-color: var(--accent);
 }
 
-.journal-item span {
+.journal-item-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+}
+
+.journal-item-date {
+  color: var(--text);
+}
+
+.journal-item-preview {
   display: -webkit-box;
   overflow: hidden;
   color: var(--muted);
@@ -1493,11 +2027,15 @@ h2 {
 }
 
 .path-control {
-  display: block;
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
 }
 
 .path-row code {
   display: block;
+  min-width: 0;
+  flex: 1;
   overflow-wrap: anywhere;
   padding: 10px 12px;
   border: 1px solid #dfe3e8;
@@ -1505,6 +2043,21 @@ h2 {
   background: #f7f8fa;
   color: #2b3036;
   line-height: 1.5;
+}
+
+.path-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.path-actions .secondary-button {
+  min-width: 58px;
+  min-height: 0;
+  height: auto;
+  padding: 6px 10px;
+  font-size: 13px;
 }
 
 .storage-actions {
@@ -1589,6 +2142,22 @@ h2 {
 
 .table-modal-card {
   width: min(1040px, 96vw);
+}
+
+.daily-plan-modal-card {
+  box-sizing: border-box;
+  max-height: calc(100vh - 48px);
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.daily-plan-modal-card .editable-table-wrap {
+  max-height: none;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .import-choice-grid {
@@ -1923,9 +2492,8 @@ h2 {
     grid-template-columns: 1fr;
   }
 
-  .settings-reminder-panel,
-  .settings-tags-panel {
-    grid-column: auto;
+  .settings-menu-panel {
+    align-self: stretch;
   }
 
   .section-head {
@@ -1935,5 +2503,33 @@ h2 {
   .topbar-actions {
     display: grid;
     justify-items: end;
+  }
+
+  .daily-plan-voice {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "head"
+      "status"
+      "format"
+      "controls"
+      "text";
+  }
+
+  .daily-plan-voice-text-field {
+    grid-template-rows: auto minmax(120px, auto);
+  }
+
+  .daily-plan-voice-text-field textarea {
+    min-height: 120px;
+    height: auto;
+  }
+
+  .daily-plan-date-toolbar {
+    align-items: end;
+    flex-wrap: wrap;
+  }
+
+  .daily-plan-voice-entry {
+    margin-left: 0;
   }
 }

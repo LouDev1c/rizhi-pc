@@ -1,5 +1,6 @@
 const fsSync = require('fs');
 const fs = require('fs/promises');
+const { legacyRatingToTagId, normalizeJournalTagId } = require('../shared/journalTags');
 const path = require('path');
 
 const LEGACY_DATA_FILE_NAME = 'whbr-data.json';
@@ -559,20 +560,6 @@ function normalizeJournalForStorage(journal) {
     dateRangeEnd,
     tagId: normalizeJournalTagId(journal && (journal.tagId || legacyRatingToTagId(rating)))
   };
-}
-
-function normalizeJournalTagId(value) {
-  return String(value || '').trim();
-}
-
-function legacyRatingToTagId(value) {
-  return {
-    '一星': 'legacy-1',
-    '二星': 'legacy-2',
-    '三星': 'legacy-3',
-    '四星': 'legacy-4',
-    '五星': 'legacy-5'
-  }[String(value || '').trim()] || '';
 }
 
 function collectDateMonths(startDate, endDate = '') {

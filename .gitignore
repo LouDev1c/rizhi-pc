@@ -12,6 +12,7 @@ dist/
 out/
 release/
 tools/
+dev_models/
 copyright_materials/
 
 # Environment

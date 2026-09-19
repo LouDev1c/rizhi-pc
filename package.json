@@ -1,6 +1,6 @@
 {
   "name": "rizhi",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "日织 - 工作、学习与生活平衡管理桌面客户端",
   "main": "main.js",
   "author": "",
@@ -11,7 +11,7 @@
   },
   "scripts": {
     "start": "electron .",
-    "check": "node --check main.js && node --check preload.js && node --check src/renderer.js && node --check src/parsers/scheduleParser.js && node --check src/parsers/textScheduleParser.js && node --check src/storage/localDataStore.js",
+    "check": "node --check main.js && node --check preload.js && node --check src/renderer.js && node --check src/asr/asrModelConfig.js && node --check src/asr/modelManager.js && node --check src/asr/asrService.js && node --check src/asr/asrWorker.js && node --check src/shared/dateUtils.js && node --check src/shared/taskTimeUtils.js && node --check src/shared/journalTags.js && node --check src/parsers/scheduleParser.js && node --check src/parsers/textScheduleParser.js && node --check src/parsers/taskTextParser.js && node --check src/parsers/textUtils.js && node --check src/storage/localDataStore.js && node tests/taskTextParser.test.js",
     "pack": "electron-builder --dir",
     "dist": "electron-builder --win nsis",
     "release": "electron-builder --win nsis --publish always"
@@ -73,6 +73,7 @@
   },
   "dependencies": {
     "electron-updater": "^6.8.9",
+    "sherpa-onnx": "^1.13.8",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   }
 }

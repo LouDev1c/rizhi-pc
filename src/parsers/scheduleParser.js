@@ -1,5 +1,6 @@
 const fs = require('fs/promises');
 const path = require('path');
+const { collapseRepeatedText } = require('./textUtils');
 const { extractDate, extractTimeRange, extractTitle, guessType } = require('./textScheduleParser');
 
 async function parseScheduleFile(filePath) {
@@ -267,21 +268,6 @@ function taskTimeRangePattern(startTime, endTime) {
 function clockPattern(clock) {
   const [hour, minute] = String(clock).split(':');
   return `0?${Number(hour)}\\s*[:：.]\\s*${minute}`;
-}
-
-function collapseRepeatedText(value) {
-  const text = String(value || '').trim();
-  if (!text) return '';
-
-  for (let length = 2; length <= Math.floor(text.length / 2); length += 1) {
-    const chunk = text.slice(0, length).trim();
-    if (!chunk) continue;
-    if (text.replace(/\s+/g, '') === `${chunk}${chunk}`.replace(/\s+/g, '')) {
-      return chunk;
-    }
-  }
-
-  return text.replace(/^(.+?)\s+\1$/u, '$1').trim();
 }
 
 function extractSheetAnnotations(sheet, rows, tasks, context = {}) {
