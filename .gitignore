@@ -1,7 +1,13 @@
-# Dependencies
+# Dependencies and package-manager caches
 node_modules/
+.npm/
+.pnpm-store/
+.yarn/cache/
+.yarn/unplugged/
 
 # Logs
+logs/
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -11,17 +17,32 @@ pnpm-debug.log*
 dist/
 out/
 release/
+
+# Test outputs
+coverage/
+.nyc_output/
+
+# Local tools, models, and reference materials
 tools/
 dev_models/
 copyright_materials/
 
 # Environment
 .env
-.env.local
+.env.*
+!.env.example
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.swp
+~$*
 
 # OS / IDE
 .DS_Store
 Thumbs.db
+Desktop.ini
 .vscode/
 .idea/
 
