@@ -24,6 +24,21 @@
     return hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59;
   }
 
+  function completeClockInput(value) {
+    const rawDigits = String(value || '').replace(/\D/g, '').slice(0, 4);
+    let digits = rawDigits;
+
+    if (digits.length === 0) digits = '0000';
+    else if (digits.length === 1) digits = `0${digits}00`;
+    else if (digits.length === 2) digits = `${digits}00`;
+    else if (digits.length === 3) digits = `0${digits}`;
+
+    const hours = Number(digits.slice(0, 2));
+    const minutes = Number(digits.slice(2, 4));
+    if (!isValidClockPart(hours, minutes)) return '';
+    return `${digits.slice(0, 2)}:${digits.slice(2, 4)}`;
+  }
+
   function extractTimeRangeFromInput(value) {
     const match = formatTimeRangeInput(value).match(/^(\d{2}):(\d{2})-(\d{2}):(\d{2})$/);
     if (!match) return null;
@@ -72,6 +87,7 @@
   }
 
   return {
+    completeClockInput,
     extractTimeRangeFromInput,
     formatTimeRangeInput,
     inputRangeToComparableIntervals,

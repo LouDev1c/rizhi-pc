@@ -21,6 +21,8 @@ contextBridge.exposeInMainWorld('whbr', {
   chooseDataPath: (data) => ipcRenderer.invoke('data:choosePath', data),
   openDataPath: () => ipcRenderer.invoke('data:openDirectory'),
   resetData: () => ipcRenderer.invoke('data:reset'),
+  onHistoryUndo: (listener) => subscribeToAsrEvent('history:undo', listener),
+  onHistoryRedo: (listener) => subscribeToAsrEvent('history:redo', listener),
   showReminder: (payload) => ipcRenderer.invoke('notify:show', payload),
   asr: {
     getModelStatus: () => ipcRenderer.invoke('asr:modelStatus'),

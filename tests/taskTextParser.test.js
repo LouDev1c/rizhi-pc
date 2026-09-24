@@ -1,8 +1,15 @@
 const assert = require('assert/strict');
 const { parseTaskText, parseTaskTextList } = require('../src/parsers/taskTextParser');
-const { rangeToComparableIntervals, rangesOverlap } = require('../src/shared/taskTimeUtils');
+const { completeClockInput, rangeToComparableIntervals, rangesOverlap } = require('../src/shared/taskTimeUtils');
 
 assert.equal(rangesOverlap(rangeToComparableIntervals('09:00', '10:00'), rangeToComparableIntervals('10:00', '11:00')), false, '相邻任务应允许前一任务结束时间等于后一任务开始时间。');
+assert.equal(rangesOverlap(rangeToComparableIntervals('09:00', '10:30'), rangeToComparableIntervals('10:00', '11:00')), true, '真正重叠的任务必须判定为冲突。');
+assert.equal(completeClockInput(''), '00:00');
+assert.equal(completeClockInput('9'), '09:00');
+assert.equal(completeClockInput('09'), '09:00');
+assert.equal(completeClockInput('930'), '09:30');
+assert.equal(completeClockInput('0930'), '09:30');
+assert.equal(completeClockInput('2460'), '', '不存在的时间不能提交。');
 
 function expectParsed(text, referenceDate, expected) {
   const result = parseTaskText(text, { referenceDate });
@@ -141,4 +148,3 @@ const dailyDuration = (task) => { const start = Number(task.startTime.slice(0, 2
 assert.ok(midnightRegression.tasks.reduce((total, task) => total + dailyDuration(task), 0) <= 1440, '一天内连续任务的总时长不应超过 24 小时。');
 
 console.log('taskTextParser tests passed');
-

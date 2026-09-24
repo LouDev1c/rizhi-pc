@@ -27,6 +27,7 @@ const {
   weekdayFromDate
 } = globalThis.RizhiDateUtils;
 const {
+  completeClockInput,
   extractTimeRangeFromInput,
   formatTimeRangeInput,
   inputRangeToComparableIntervals,
@@ -63,6 +64,7 @@ const journalVoiceCancelButton = document.querySelector('#journalVoiceCancelButt
 const journalVoiceTimer = document.querySelector('#journalVoiceTimer');
 const journalVoiceStatus = document.querySelector('#journalVoiceStatus');
 const journalFilterModeButton = document.querySelector('#journalFilterModeButton');
+const journalSearchInput = document.querySelector('#journalSearchInput');
 const journalTagFilter = document.querySelector('#journalTagFilter');
 const journalTagFilterPaletteButton = document.querySelector('#journalTagFilterPaletteButton');
 const journalTagFilterPalette = document.querySelector('#journalTagFilterPalette');
@@ -216,8 +218,10 @@ let statusTimer = null;
 let tutorialStepIndex = 0;
 let previousTutorialPage = 'tasks';
 let appliedJournalTagFilter = '';
+let appliedJournalSearch = '';
 let journalFilterMode = 'all';
 let recordsView = 'editor';
+let taskHistoryOperationInProgress = false;
 let committedProfileStatsStartDate = '';
 let pendingJournalUnsavedResolver = null;
 let journalDateChangePending = false;
@@ -272,6 +276,9 @@ let dailyPlanVoiceParsedText = '';
 const firedReminderKeys = new Set();
 const activePlanningDates = new Set();
 const dateInputControllers = new WeakMap();
+const taskUndoStack = [];
+const taskRedoStack = [];
+const TASK_HISTORY_LIMIT = 50;
 const MISSED_REMINDER_BACKLOG_LIMIT_MINUTES = 2;
 const tutorialSteps = [
   {
@@ -378,6 +385,7 @@ document.querySelectorAll('.date-step-button').forEach((button) => {
   button.addEventListener('mousedown', (event) => event.preventDefault());
   button.addEventListener('click', handleDateStepButton);
 });
+addTodayButtonsToDateInputs();
 
 if (tutorialButton) tutorialButton.addEventListener('click', openTutorialConfirmModal);
 if (tutorialConfirmNoButton) tutorialConfirmNoButton.addEventListener('click', closeTutorialConfirmModal);
@@ -402,6 +410,9 @@ window.addEventListener('resize', () => {
   if (!tutorialOverlay.classList.contains('hidden')) positionTutorialOverlay();
 });
 document.addEventListener('click', closeTagPalettesOnOutsideClick);
+document.addEventListener('keydown', handleTaskHistoryShortcut);
+if (window.whbr.onHistoryUndo) window.whbr.onHistoryUndo(handleTaskHistoryUndo);
+if (window.whbr.onHistoryRedo) window.whbr.onHistoryRedo(handleTaskHistoryRedo);
 
 backToCurrentTaskButton.addEventListener('click', async () => {
   if (await confirmLeaveRecordsPageIfNeeded('tasks')) goToCurrentTask();
@@ -495,6 +506,14 @@ if (journalTagFilter) {
 if (journalTagPaletteButton) journalTagPaletteButton.addEventListener('click', () => toggleTagPalette(journalTagPalette));
 if (journalTagFilterPaletteButton) journalTagFilterPaletteButton.addEventListener('click', () => toggleTagPalette(journalTagFilterPalette));
 if (journalFilterModeButton) journalFilterModeButton.addEventListener('click', cycleJournalFilterMode);
+if (journalSearchInput) {
+  journalSearchInput.addEventListener('blur', commitJournalSearch);
+  journalSearchInput.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    journalSearchInput.blur();
+  });
+}
 if (showJournalListButton) showJournalListButton.addEventListener('click', () => showRecordsView('list'));
 if (backToJournalEditorButton) backToJournalEditorButton.addEventListener('click', () => showRecordsView('editor'));
 saveJournalButton.addEventListener('click', saveSelectedJournal);
@@ -1740,6 +1759,38 @@ function handleDateStepButton(event) {
   button.blur();
 }
 
+function addTodayButtonsToDateInputs() {
+  document.querySelectorAll('input[type="date"]').forEach((input) => {
+    const label = input.closest('label');
+    const labelText = label && Array.from(label.children).find((child) => child.tagName === 'SPAN');
+    if (!label || !labelText || !input.id) return;
+
+    const labelRow = document.createElement('span');
+    labelRow.className = 'date-label-row';
+    const todayButton = document.createElement('button');
+    todayButton.className = 'date-today-button';
+    todayButton.type = 'button';
+    todayButton.textContent = '今天';
+    todayButton.title = '返回当天日期';
+    todayButton.setAttribute('aria-label', '返回当天日期');
+    todayButton.addEventListener('mousedown', (event) => event.preventDefault());
+    todayButton.addEventListener('click', handleDateTodayButton);
+
+    label.insertBefore(labelRow, labelText);
+    labelRow.append(labelText, todayButton);
+  });
+}
+
+function handleDateTodayButton(event) {
+  const button = event.currentTarget;
+  const input = button.closest('label')?.querySelector('input[type="date"]');
+  if (!input) return;
+
+  setDateInputValue(input, formatLocalDate(currentEffectiveNow || new Date()), { trigger: true });
+  input.blur();
+  button.blur();
+}
+
 function registerDateInput(input, options = {}) {
   if (!input) return;
 
@@ -2923,6 +2974,13 @@ function renderTasks(options = {}) {
     separator.textContent = '-';
     const endInput = createTaskTimeInput(task.endTime, '结束时间');
     endInput.classList.toggle('time-conflict', hasTimeConflict);
+    [startInput, endInput].forEach((input) => {
+      input.addEventListener('focus', () => {
+        input.dataset.autoAdvanced = '';
+        input.select();
+      });
+      input.addEventListener('click', () => input.select());
+    });
     startInput.addEventListener('input', () => handleTaskTimeInput(startInput, endInput));
     endInput.addEventListener('input', () => handleTaskTimeInput(endInput));
     startInput.addEventListener('blur', () => commitTaskTimeField(task.id, 'startTime', startInput));
@@ -3382,8 +3440,19 @@ function normalizeTaskTimeInput(value) {
 }
 
 function commitTaskTimeField(taskId, field, input) {
-  const normalized = normalizeTaskTimeInput(input.value);
+  const normalized = completeClockInput(input.value);
+  if (!normalized) {
+    input.value = formatTaskTimeInput(input.value);
+    input.classList.add('time-invalid');
+    input.setAttribute('aria-invalid', 'true');
+    input.title = '请输入 0000 至 2359 之间的有效时间。';
+    return;
+  }
+
   input.value = normalized;
+  input.classList.remove('time-invalid');
+  input.removeAttribute('aria-invalid');
+  input.title = '';
   updateTaskField(taskId, field, normalized, { render: false, splitCrossDay: true });
 }
 
@@ -3483,27 +3552,14 @@ function syncTaskCardTimeInputs(card, task) {
 function normalizeTaskDayBoundaries() {
   const before = taskNormalizationSignature(tasks);
   const restoredTasks = restoreSplitTaskParents(tasks);
-  const grouped = groupTasksByOriginalDate(restoredTasks);
-  const normalizedTasks = [];
   const orderCounters = new Map();
-
-  Array.from(grouped.keys()).sort().forEach((date) => {
-    let dayOffset = 0;
-    let previousStart = null;
-    const dayTasks = grouped.get(date);
-
-    dayTasks.forEach((task) => {
-      const start = timeToMinutes(task.startTime);
-      const end = timeToMinutes(task.endTime);
-      if (start !== null && previousStart !== null && start < previousStart) dayOffset += 1;
-      previousStart = start === null ? previousStart : start;
-
-      const actualDate = shiftDate(date, dayOffset);
-      normalizedTasks.push(...normalizeTaskIntoDayPieces(task, actualDate, orderCounters));
-    });
-  });
-
-  tasks = resolveDayOverlaps(normalizedTasks);
+  tasks = restoredTasks
+    .filter((task) => normalizeDate(task.date))
+    .sort((a, b) => {
+      const dateCompare = normalizeDate(a.date).localeCompare(normalizeDate(b.date));
+      return dateCompare || compareTasksByOrderThenTime(a, b);
+    })
+    .flatMap((task) => normalizeTaskIntoDayPieces(task, normalizeDate(task.date), orderCounters));
   return { changed: before !== taskNormalizationSignature(tasks) };
 }
 
@@ -3525,17 +3581,6 @@ function restoreSplitTaskParents(taskItems) {
   });
 
   return baseTasks;
-}
-
-function groupTasksByOriginalDate(taskItems) {
-  return taskItems.reduce((groups, task) => {
-    const date = normalizeDate(task.date);
-    if (!date) return groups;
-    if (!groups.has(date)) groups.set(date, []);
-    groups.get(date).push(task);
-    groups.get(date).sort(compareTasksByOrderThenTime);
-    return groups;
-  }, new Map());
 }
 
 function compareTasksByOrderThenTime(a, b) {
@@ -3581,44 +3626,6 @@ function nextNormalizedOrder(date, counters) {
   return next;
 }
 
-function resolveDayOverlaps(taskItems) {
-  const grouped = groupTasksByOriginalDate(taskItems);
-  const resolved = [];
-
-  Array.from(grouped.keys()).sort().forEach((date) => {
-    const dayTasks = grouped.get(date).sort((a, b) => {
-      const startCompare = timeToMinutes(a.startTime) - timeToMinutes(b.startTime);
-      return startCompare || compareTasksByOrderThenTime(a, b);
-    });
-
-    dayTasks.forEach((task) => {
-      const previous = resolved[resolved.length - 1];
-      if (previous && normalizeDate(previous.date) === date) {
-        const previousEnd = comparableDayEnd(previous.endTime);
-        const currentStart = timeToMinutes(task.startTime);
-        if (previousEnd !== null && currentStart !== null && currentStart < previousEnd) {
-          previous.endTime = minutesToTime(currentStart);
-        }
-      }
-      if (taskDurationMinutes(task) > 0 || task.isDraft) resolved.push(task);
-    });
-  });
-
-  return resolved;
-}
-
-function comparableDayEnd(value) {
-  const minutes = timeToMinutes(value);
-  if (minutes === null) return null;
-  return minutes === 0 ? 24 * 60 : minutes;
-}
-
-function minutesToTime(minutes) {
-  const normalized = Math.max(0, Math.min(24 * 60, minutes));
-  if (normalized === 24 * 60) return '00:00';
-  return `${String(Math.floor(normalized / 60)).padStart(2, '0')}:${String(normalized % 60).padStart(2, '0')}`;
-}
-
 function taskNormalizationSignature(taskItems) {
   return JSON.stringify(taskItems.map((task) => ({
     id: clean(task.id),
@@ -3631,9 +3638,93 @@ function taskNormalizationSignature(taskItems) {
 }
 
 async function deleteTask(taskId) {
+  const deletedTasks = tasks.filter((task) => task.id === taskId || clean(task.splitParentId) === taskId);
+  if (deletedTasks.length === 0) return;
+
   tasks = tasks.filter((task) => task.id !== taskId && clean(task.splitParentId) !== taskId);
+  recordTaskDeletion(deletedTasks);
   await saveState();
   renderTasks();
+  setStatus('任务已删除。按 Ctrl+Z 可恢复。', '', 5000);
+}
+
+function recordTaskDeletion(deletedTasks) {
+  taskUndoStack.push({
+    tasks: deletedTasks.map((task) => ({ ...task })),
+    taskIds: deletedTasks.map((task) => task.id)
+  });
+  if (taskUndoStack.length > TASK_HISTORY_LIMIT) taskUndoStack.shift();
+  taskRedoStack.length = 0;
+}
+
+function handleTaskHistoryShortcut(event) {
+  if ((!event.ctrlKey && !event.metaKey) || event.altKey || isTextEditingElement(event.target)) return;
+
+  const key = event.key.toLowerCase();
+  if (key === 'z' && !event.shiftKey) {
+    event.preventDefault();
+    void undoTaskDeletion();
+  } else if (key === 'y' || (key === 'z' && event.shiftKey)) {
+    event.preventDefault();
+    void redoTaskDeletion();
+  }
+}
+
+function handleTaskHistoryUndo() {
+  if (isTextEditingElement(document.activeElement)) {
+    document.execCommand('undo');
+    return;
+  }
+  void undoTaskDeletion();
+}
+
+function handleTaskHistoryRedo() {
+  if (isTextEditingElement(document.activeElement)) {
+    document.execCommand('redo');
+    return;
+  }
+  void redoTaskDeletion();
+}
+
+function isTextEditingElement(element) {
+  return element instanceof HTMLInputElement
+    || element instanceof HTMLTextAreaElement
+    || Boolean(element && element.isContentEditable);
+}
+
+async function undoTaskDeletion() {
+  if (taskHistoryOperationInProgress || taskUndoStack.length === 0) return;
+  taskHistoryOperationInProgress = true;
+
+  try {
+    const deletion = taskUndoStack.pop();
+    const existingTaskIds = new Set(tasks.map((task) => task.id));
+    const restoredTasks = deletion.tasks.filter((task) => !existingTaskIds.has(task.id));
+    tasks = [...tasks, ...restoredTasks];
+    taskRedoStack.push(deletion);
+    await saveState();
+    renderTasks();
+    setStatus(`已恢复 ${restoredTasks.length} 条任务。`, '', 5000);
+  } finally {
+    taskHistoryOperationInProgress = false;
+  }
+}
+
+async function redoTaskDeletion() {
+  if (taskHistoryOperationInProgress || taskRedoStack.length === 0) return;
+  taskHistoryOperationInProgress = true;
+
+  try {
+    const deletion = taskRedoStack.pop();
+    const taskIds = new Set(deletion.taskIds);
+    tasks = tasks.filter((task) => !taskIds.has(task.id));
+    taskUndoStack.push(deletion);
+    await saveState();
+    renderTasks();
+    setStatus('已重新删除任务。', '', 5000);
+  } finally {
+    taskHistoryOperationInProgress = false;
+  }
 }
 
 function handleTaskDragStart(event, taskId) {
@@ -4258,6 +4349,7 @@ function renderJournalList() {
   const visibleJournals = filteredJournalsForList();
 
   if (visibleJournals.length === 0) {
+    if (appliedJournalSearch) return;
     const empty = document.createElement('p');
     empty.className = 'muted';
     empty.textContent = journals.length === 0
@@ -4293,6 +4385,11 @@ function renderJournalList() {
 }
 
 function filteredJournalsForList() {
+  if (appliedJournalSearch) {
+    const searchTerm = appliedJournalSearch.toLocaleLowerCase();
+    return journals.filter((journal) => journalSearchText(journal).toLocaleLowerCase().includes(searchTerm));
+  }
+
   if (journalFilterMode === 'date') {
     const selectedDate = normalizeDate(journalViewDate ? journalViewDate.value : '');
     if (!selectedDate) return [];
@@ -4304,6 +4401,23 @@ function filteredJournalsForList() {
   }
 
   return journals;
+}
+
+function commitJournalSearch() {
+  const searchTerm = clean(journalSearchInput ? journalSearchInput.value : '');
+  if (searchTerm === appliedJournalSearch) return;
+  appliedJournalSearch = searchTerm;
+  renderJournalListPreservingScroll();
+}
+
+function journalSearchText(journal) {
+  const tag = journalTagById(journal.tagId);
+  return [
+    journalDisplayDate(journal),
+    journal.content,
+    tag ? tag.shortName : '',
+    tag ? tag.fullName : ''
+  ].filter(Boolean).join(' ');
 }
 
 function updateJournalFilterControls() {
@@ -5083,15 +5197,33 @@ function clearLegacyLocalStorage() {
 
 function setStatus(message, extraClass, timeoutMs = 0) {
   window.clearTimeout(statusTimer);
-  statusBox.textContent = message;
+  statusBox.replaceChildren();
   statusBox.className = `status-box ${extraClass || ''}`.trim();
 
-  if (timeoutMs > 0) {
-    statusTimer = window.setTimeout(() => {
-      statusBox.textContent = '';
-      statusBox.className = 'status-box hidden';
-    }, timeoutMs);
+  if (!statusBox.classList.contains('hidden')) {
+    const text = document.createElement('span');
+    text.className = 'status-box-message';
+    text.textContent = message;
+
+    const closeButton = document.createElement('button');
+    closeButton.className = 'status-box-close';
+    closeButton.type = 'button';
+    closeButton.textContent = '×';
+    closeButton.title = '关闭提示';
+    closeButton.setAttribute('aria-label', '关闭提示');
+    closeButton.addEventListener('click', hideStatus);
+    statusBox.append(text, closeButton);
   }
+
+  if (timeoutMs > 0) {
+    statusTimer = window.setTimeout(hideStatus, timeoutMs);
+  }
+}
+
+function hideStatus() {
+  window.clearTimeout(statusTimer);
+  statusBox.replaceChildren();
+  statusBox.className = 'status-box hidden';
 }
 
 function clean(value) {

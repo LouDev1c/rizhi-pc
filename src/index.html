@@ -71,7 +71,7 @@
               </div>
               <div class="toolbar-actions">
                 <label class="compact-date-picker">
-                  <span>查看日期</span>
+                  <span>日期</span>
                   <div class="date-stepper">
                     <input id="taskDateFilter" type="date" />
                     <div class="date-stepper-buttons" aria-hidden="false">
@@ -188,14 +188,15 @@
 
             <section class="panel records-list-panel hidden" id="recordsListPanel">
               <div class="section-head">
-                <div>
+                <div class="record-list-heading">
                   <h2>记录列表</h2>
+                  <input id="journalSearchInput" class="record-search-input" type="search" placeholder="🔎搜索" aria-label="搜索记录" />
                 </div>
                 <div class="record-filter">
                   <button id="backToJournalEditorButton" class="secondary-button" type="button">返回填写</button>
                   <button id="journalFilterModeButton" class="secondary-button filter-mode-button" type="button">显示全部</button>
                   <label id="journalViewDateField" class="date-picker hidden">
-                    <span>查看日期</span>
+                    <span>日期</span>
                     <div class="date-stepper">
                       <input id="journalViewDate" type="date" />
                       <div class="date-stepper-buttons" aria-hidden="false">

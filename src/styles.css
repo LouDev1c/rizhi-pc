@@ -680,12 +680,40 @@ h2 {
 }
 
 .status-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
   padding: 12px 14px;
   border: 1px solid #ded2b9;
   border-radius: 8px;
   background: #fffaf0;
   color: var(--warning);
   line-height: 1.6;
+}
+
+.status-box-message {
+  flex: 1;
+}
+
+.status-box-close {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.status-box-close:hover,
+.status-box-close:focus-visible {
+  background: rgba(138, 100, 32, 0.12);
+  outline: none;
 }
 
 .task-list {
@@ -796,6 +824,7 @@ h2 {
 }
 
 .task-time-editor .inline-field.time-conflict,
+.task-time-editor .inline-field.time-invalid,
 .editable-table input.time-conflict {
   border-color: #dc2626;
   background: #fff1f2;
@@ -1395,6 +1424,33 @@ h2 {
   font-size: 12px;
 }
 
+.date-label-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+}
+
+.date-today-button {
+  min-height: 20px;
+  padding: 1px 6px;
+  border: 1px solid #d5d9de;
+  border-radius: 5px;
+  background: #f1f3f5;
+  color: #59636e;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.25;
+  cursor: pointer;
+}
+
+.date-today-button:hover,
+.date-today-button:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent-dark);
+  outline: none;
+}
+
 .compact-date-picker input {
   width: 184px;
   height: 40px;
@@ -1903,6 +1959,36 @@ h2 {
 .journal-list {
   display: grid;
   gap: 10px;
+}
+
+.record-list-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.record-list-heading h2 {
+  margin-bottom: 0;
+}
+
+.record-search-input {
+  width: 220px;
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid #d5d9de;
+  border-radius: 7px;
+  background: #f1f3f5;
+  color: var(--text);
+  font: inherit;
+}
+
+.record-search-input::placeholder {
+  color: #7b838c;
+}
+
+.record-search-input:focus {
+  border-color: var(--accent);
+  outline: none;
 }
 
 .record-filter {
