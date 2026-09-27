@@ -12,6 +12,7 @@ const DATA_FILE_PATTERN = 'rizhi-data-YYYY-MM.json';
 const DATA_FILE_REGEX = /^rizhi-data-(\d{4}-\d{2})\.json$/;
 const SETTINGS_FILE_NAME = 'rizhi-settings.json';
 const SETTINGS_LOCATION_FILE_NAME = 'rizhi-settings-location.json';
+const MEDIA_MONTH_DIRECTORY_REGEX = /^\d{4}-\d{2}$/;
 
 function createDefaultData() {
   return {
@@ -72,6 +73,12 @@ async function getDataDirectory(app) {
   return getDefaultMemoryDir(app);
 }
 
+async function getMediaDirectory(app, dataDirectory = '') {
+  const settings = await readSettings(app);
+  if (settings.mediaDirectory) return settings.mediaDirectory;
+  return path.join(dataDirectory || await getDataDirectory(app), 'images');
+}
+
 async function getDataPath(app) {
   return getMonthlyDataPath(await getDataDirectory(app), monthKeyFromDate(new Date()));
 }
@@ -126,6 +133,7 @@ async function writeSettings(app, settings) {
 async function loadData(app) {
   await migrateStorageNames(app);
   const dataDirectory = await getDataDirectory(app);
+  const mediaDirectory = await getMediaDirectory(app, dataDirectory);
   const settingsFilePath = await getActiveSettingsPath(app);
   const settings = await readSettings(app);
   const monthlyFiles = await listMonthlyDataFiles(dataDirectory);
@@ -145,7 +153,7 @@ async function loadData(app) {
 
   return {
     data,
-    paths: buildPaths(app, dataDirectory, settingsFilePath, monthlyFiles),
+    paths: buildPaths(app, dataDirectory, settingsFilePath, monthlyFiles, mediaDirectory),
     status: monthlyFiles.length > 0 || legacyData.hasData ? 'ok' : 'empty'
   };
 }
@@ -153,6 +161,7 @@ async function loadData(app) {
 async function saveData(app, data) {
   await migrateStorageNames(app);
   const dataDirectory = await getDataDirectory(app);
+  const mediaDirectory = await getMediaDirectory(app, dataDirectory);
   const settingsFilePath = await getActiveSettingsPath(app);
   const normalized = normalizeData(data);
   const updatedAt = new Date().toISOString();
@@ -165,46 +174,236 @@ async function saveData(app, data) {
   const monthlyFiles = await listMonthlyDataFiles(dataDirectory);
   return {
     data: normalized,
-    paths: buildPaths(app, dataDirectory, settingsFilePath, monthlyFiles),
+    paths: buildPaths(app, dataDirectory, settingsFilePath, monthlyFiles, mediaDirectory),
     status: 'ok'
   };
 }
 
 async function setStorageDirectory(app, dataDirectory, currentData) {
-  const settingsFilePath = path.join(dataDirectory, SETTINGS_FILE_NAME);
+  await migrateStorageNames(app);
+  const oldPaths = await getStoragePaths(app);
+  const targetDirectory = path.resolve(dataDirectory);
+  if (samePath(oldPaths.dataDirectory, targetDirectory)) {
+    const result = await loadData(app);
+    return {
+      ...result,
+      migration: { from: oldPaths.dataDirectory, to: targetDirectory, skipped: true, deleted: [], cleanupWarnings: [] }
+    };
+  }
+
   const settings = await readSettings(app);
+  const sourceData = normalizeData(currentData || (await loadData(app)).data);
+  const settingsFilePath = path.join(targetDirectory, SETTINGS_FILE_NAME);
   const locationPath = getSettingsLocationPath(app);
+  const oldDefaultMediaDirectory = path.join(oldPaths.dataDirectory, 'images');
+  const migrateDefaultMedia = samePath(oldPaths.mediaDirectory, oldDefaultMediaDirectory);
+  const targetMediaDirectory = migrateDefaultMedia
+    ? path.join(targetDirectory, 'images')
+    : oldPaths.mediaDirectory;
+  const migratedData = migrateDefaultMedia
+    ? rewriteMediaRoots(sourceData, oldPaths.mediaDirectory, targetMediaDirectory)
+    : sourceData;
   const nextSettings = {
     ...settings,
-    dataDirectory,
+    dataDirectory: targetDirectory,
     dataFilePath: undefined,
-    settingsFilePath
+    settingsFilePath,
+    profile: migratedData.profile
   };
+  if (migrateDefaultMedia && settings.mediaDirectory) nextSettings.mediaDirectory = targetMediaDirectory;
+  else if (migrateDefaultMedia) delete nextSettings.mediaDirectory;
 
-  await fs.mkdir(dataDirectory, { recursive: true });
+  await fs.mkdir(targetDirectory, { recursive: true });
+  const migratedMediaEntries = migrateDefaultMedia
+    ? await copyManagedMediaEntries(oldPaths.mediaDirectory, targetMediaDirectory)
+    : [];
+  await writeMonthlyDataFiles(targetDirectory, migratedData, new Date().toISOString());
   await fs.writeFile(settingsFilePath, JSON.stringify(nextSettings, null, 2), 'utf8');
+  await validateStorageTarget(targetDirectory, settingsFilePath);
   await fs.mkdir(path.dirname(locationPath), { recursive: true });
   await fs.writeFile(locationPath, JSON.stringify({ settingsFilePath }, null, 2), 'utf8');
-  await saveData(app, currentData || createDefaultData());
-  return loadData(app);
+  const result = await loadData(app);
+  const cleanup = await cleanupOldStorage(oldPaths, {
+    nextSettingsFilePath: settingsFilePath,
+    migratedMediaEntries
+  });
+  return {
+    ...result,
+    migration: {
+      from: oldPaths.dataDirectory,
+      to: targetDirectory,
+      mediaMigrated: migrateDefaultMedia,
+      ...cleanup
+    }
+  };
 }
 
-async function resetData(app) {
+async function setMediaDirectory(app, mediaDirectory, currentData) {
+  await migrateStorageNames(app);
+  const oldPaths = await getStoragePaths(app);
+  const targetDirectory = path.resolve(mediaDirectory);
+  if (samePath(oldPaths.mediaDirectory, targetDirectory)) {
+    return {
+      data: normalizeData(currentData || (await loadData(app)).data),
+      paths: oldPaths,
+      migration: { from: oldPaths.mediaDirectory, to: targetDirectory, skipped: true, deleted: [], cleanupWarnings: [] }
+    };
+  }
+
+  const settings = await readSettings(app);
+  const sourceData = normalizeData(currentData || (await loadData(app)).data);
+  const migratedData = rewriteMediaRoots(sourceData, oldPaths.mediaDirectory, targetDirectory);
+  await fs.mkdir(targetDirectory, { recursive: true });
+  const migratedMediaEntries = await copyManagedMediaEntries(oldPaths.mediaDirectory, targetDirectory);
+
+  try {
+    await writeSettings(app, { ...settings, mediaDirectory: targetDirectory });
+    const result = await saveData(app, migratedData);
+    const cleanup = await cleanupManagedMediaEntries(oldPaths.mediaDirectory, migratedMediaEntries);
+    return {
+      ...result,
+      migration: {
+        from: oldPaths.mediaDirectory,
+        to: targetDirectory,
+        mediaMigrated: true,
+        ...cleanup
+      }
+    };
+  } catch (error) {
+    await writeSettings(app, settings).catch(() => {});
+    throw error;
+  }
+}
+
+function rewriteMediaRoots(data, oldRoot, newRoot) {
+  const normalized = normalizeData(data);
+  return {
+    ...normalized,
+    journals: normalized.journals.map((journal) => ({
+      ...journal,
+      media: Array.isArray(journal.media)
+        ? journal.media.map((item) => {
+          if (!item || typeof item !== 'object') return item;
+          const itemRoot = item.mediaRoot ? path.resolve(item.mediaRoot) : path.resolve(oldRoot);
+          if (!samePath(itemRoot, oldRoot)) return item;
+          return { ...item, mediaRoot: path.resolve(newRoot) };
+        })
+        : journal.media
+    }))
+  };
+}
+
+async function copyManagedMediaEntries(sourceRoot, targetRoot) {
+  if (samePath(sourceRoot, targetRoot) || !(await fileExists(sourceRoot))) return [];
+  assertNonNestedMigrationPaths(sourceRoot, targetRoot);
+  const entries = await fs.readdir(sourceRoot, { withFileTypes: true });
+  const managedEntries = entries.filter((entry) => entry.isDirectory() && MEDIA_MONTH_DIRECTORY_REGEX.test(entry.name));
+  await fs.mkdir(targetRoot, { recursive: true });
+  for (const entry of managedEntries) {
+    await fs.cp(path.join(sourceRoot, entry.name), path.join(targetRoot, entry.name), {
+      recursive: true,
+      force: true
+    });
+  }
+  return managedEntries.map((entry) => entry.name);
+}
+
+function assertNonNestedMigrationPaths(sourceRoot, targetRoot) {
+  const source = path.resolve(sourceRoot);
+  const target = path.resolve(targetRoot);
+  const targetInsideSource = path.relative(source, target);
+  const sourceInsideTarget = path.relative(target, source);
+  if ((targetInsideSource && !targetInsideSource.startsWith('..') && !path.isAbsolute(targetInsideSource))
+    || (sourceInsideTarget && !sourceInsideTarget.startsWith('..') && !path.isAbsolute(sourceInsideTarget))) {
+    throw new Error('新旧媒体文件夹不能互相包含，请选择独立的文件夹。');
+  }
+}
+
+async function validateStorageTarget(dataDirectory, settingsFilePath) {
+  JSON.parse(await fs.readFile(settingsFilePath, 'utf8'));
+  const monthlyFiles = await listMonthlyDataFiles(dataDirectory);
+  for (const filePath of monthlyFiles) JSON.parse(await fs.readFile(filePath, 'utf8'));
+}
+
+async function cleanupOldStorage(oldPaths, options = {}) {
+  const deleted = [];
+  const cleanupWarnings = [];
+  await attemptCleanup(() => removeMonthlyDataFiles(oldPaths.dataDirectory, deleted), cleanupWarnings);
+  await attemptCleanup(() => removeFileIfExists(path.join(oldPaths.dataDirectory, LEGACY_DATA_FILE_NAME), deleted), cleanupWarnings);
+  await attemptCleanup(() => removeFileIfExists(path.join(oldPaths.dataDirectory, LEGACY_SETTINGS_FILE_NAME), deleted), cleanupWarnings);
+  if (!samePath(oldPaths.settingsFilePath, options.nextSettingsFilePath)) {
+    await attemptCleanup(() => removeFileIfExists(oldPaths.settingsFilePath, deleted), cleanupWarnings);
+  }
+  if (options.migratedMediaEntries && options.migratedMediaEntries.length > 0) {
+    const mediaCleanup = await cleanupManagedMediaEntries(oldPaths.mediaDirectory, options.migratedMediaEntries);
+    deleted.push(...mediaCleanup.deleted);
+    cleanupWarnings.push(...mediaCleanup.cleanupWarnings);
+  }
+  await attemptCleanup(() => removeDirectoryIfEmpty(oldPaths.mediaDirectory, deleted), cleanupWarnings);
+  await attemptCleanup(() => removeDirectoryIfEmpty(oldPaths.dataDirectory, deleted), cleanupWarnings);
+  return { deleted, cleanupWarnings };
+}
+
+async function cleanupManagedMediaEntries(sourceRoot, entryNames) {
+  const deleted = [];
+  const cleanupWarnings = [];
+  for (const entryName of entryNames) {
+    await attemptCleanup(
+      () => removeDirectoryIfExists(path.join(sourceRoot, entryName), deleted),
+      cleanupWarnings
+    );
+  }
+  await attemptCleanup(() => removeDirectoryIfEmpty(sourceRoot, deleted), cleanupWarnings);
+  return { deleted, cleanupWarnings };
+}
+
+async function attemptCleanup(action, warnings) {
+  try {
+    await action();
+  } catch (error) {
+    warnings.push(error.message || String(error));
+  }
+}
+
+async function removeDirectoryIfEmpty(directoryPath, deleted) {
+  try {
+    await fs.rmdir(directoryPath);
+    deleted.push(directoryPath);
+  } catch (error) {
+    if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(error.code)) throw error;
+  }
+}
+
+function samePath(firstPath, secondPath) {
+  const normalizeForComparison = (value) => {
+    const resolved = path.normalize(path.resolve(value || ''));
+    return process.platform === 'win32' ? resolved.toLocaleLowerCase() : resolved;
+  };
+  return normalizeForComparison(firstPath) === normalizeForComparison(secondPath);
+}
+
+async function resetData(app, data = createDefaultData(), options = {}) {
   await migrateStorageNames(app);
   const dataDirectory = await getDataDirectory(app);
-  const settingsFilePath = await getActiveSettingsPath(app);
-  const settingsLocationPath = getSettingsLocationPath(app);
+  const mediaDirectory = await getMediaDirectory(app, dataDirectory);
   const deleted = [];
+  const clearMedia = Boolean(options && options.clearMedia);
+  const normalized = normalizeData(data);
 
   await removeMonthlyDataFiles(dataDirectory, deleted);
   await removeFileIfExists(path.join(dataDirectory, LEGACY_DATA_FILE_NAME), deleted);
-  await removeFileIfExists(settingsFilePath, deleted);
-  await removeFileIfExists(settingsLocationPath, deleted);
+  if (clearMedia) {
+    await removeDirectoryIfExists(mediaDirectory, deleted);
+    if (path.resolve(mediaDirectory) !== path.resolve(path.join(dataDirectory, 'images'))) {
+      await removeDirectoryIfExists(path.join(dataDirectory, 'images'), deleted);
+    }
+  }
+  await removeDirectoryIfExists(path.join(dataDirectory, '.upload-staging'), deleted);
+  const result = await saveData(app, normalized);
 
   return {
-    data: createDefaultData(),
+    ...result,
     deleted,
-    paths: buildPaths(app, getDefaultMemoryDir(app), getDefaultSettingsPath(app), []),
     status: 'reset'
   };
 }
@@ -212,15 +411,17 @@ async function resetData(app) {
 async function getStoragePaths(app) {
   await migrateStorageNames(app);
   const dataDirectory = await getDataDirectory(app);
+  const mediaDirectory = await getMediaDirectory(app, dataDirectory);
   const settingsFilePath = await getActiveSettingsPath(app);
   const monthlyFiles = await listMonthlyDataFiles(dataDirectory);
-  return buildPaths(app, dataDirectory, settingsFilePath, monthlyFiles);
+  return buildPaths(app, dataDirectory, settingsFilePath, monthlyFiles, mediaDirectory);
 }
 
-function buildPaths(app, dataDirectory, settingsFilePath, monthlyFiles = []) {
+function buildPaths(app, dataDirectory, settingsFilePath, monthlyFiles = [], mediaDirectory = path.join(dataDirectory, 'images')) {
   const currentMonth = monthKeyFromDate(new Date());
   return {
     dataDirectory,
+    mediaDirectory,
     dataFilePath: getMonthlyDataPath(dataDirectory, currentMonth),
     dataFilePattern: path.join(dataDirectory, DATA_FILE_PATTERN),
     monthlyDataFiles: monthlyFiles,
@@ -527,6 +728,15 @@ async function removeFileIfExists(filePath, deleted) {
   }
 }
 
+async function removeDirectoryIfExists(directoryPath, deleted) {
+  try {
+    await fs.rm(directoryPath, { recursive: true, force: true });
+    deleted.push(directoryPath);
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+}
+
 function normalizeData(data) {
   return {
     version: Number(data && data.version) || 2,
@@ -615,5 +825,6 @@ module.exports = {
   loadData,
   resetData,
   saveData,
-  setStorageDirectory
+  setStorageDirectory,
+  setMediaDirectory
 };

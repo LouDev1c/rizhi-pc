@@ -31,6 +31,7 @@ const {
   extractTimeRangeFromInput,
   formatTimeRangeInput,
   inputRangeToComparableIntervals,
+  isAllDayRange,
   isValidClockPart,
   normalizeTime,
   rangesOverlap,
@@ -50,6 +51,12 @@ const manualTaskButton = document.querySelector('#manualTaskButton');
 const importFileButton = document.querySelector('#importFileButton');
 const backToCurrentTaskButton = document.querySelector('#backToCurrentTaskButton');
 const reusePreviousButton = document.querySelector('#reusePreviousButton');
+const reuseDateModal = document.querySelector('#reuseDateModal');
+const closeReuseDateModalButton = document.querySelector('#closeReuseDateModalButton');
+const cancelReuseDateButton = document.querySelector('#cancelReuseDateButton');
+const confirmReuseDateButton = document.querySelector('#confirmReuseDateButton');
+const reuseSourceDate = document.querySelector('#reuseSourceDate');
+const reuseDateDescription = document.querySelector('#reuseDateDescription');
 const importMoreButton = document.querySelector('#importMoreButton');
 const taskDateFilter = document.querySelector('#taskDateFilter');
 const journalDate = document.querySelector('#journalDate');
@@ -58,6 +65,7 @@ const journalTagPaletteButton = document.querySelector('#journalTagPaletteButton
 const journalTagPalette = document.querySelector('#journalTagPalette');
 const journalContent = document.querySelector('#journalContent');
 const saveJournalButton = document.querySelector('#saveJournalButton');
+const openMediaUploadButton = document.querySelector('#openMediaUploadButton');
 const journalSaveState = document.querySelector('#journalSaveState');
 const journalVoiceStartButton = document.querySelector('#journalVoiceStartButton');
 const journalVoiceCancelButton = document.querySelector('#journalVoiceCancelButton');
@@ -79,9 +87,12 @@ const showJournalListButton = document.querySelector('#showJournalListButton');
 const backToJournalEditorButton = document.querySelector('#backToJournalEditorButton');
 const dataFilePath = document.querySelector('#dataFilePath');
 const settingsFilePath = document.querySelector('#settingsFilePath');
+const mediaDirectoryPath = document.querySelector('#mediaDirectoryPath');
 const modelDownloadPath = document.querySelector('#modelDownloadPath');
 const chooseDataPathButton = document.querySelector('#chooseDataPathButton');
 const openDataPathButton = document.querySelector('#openDataPathButton');
+const chooseMediaDirectoryButton = document.querySelector('#chooseMediaDirectoryButton');
+const openMediaDirectoryButton = document.querySelector('#openMediaDirectoryButton');
 const changeSettingsPathButton = document.querySelector('#changeSettingsPathButton');
 const openSettingsPathButton = document.querySelector('#openSettingsPathButton');
 const openModelDirectoryButton = document.querySelector('#openModelDirectoryButton');
@@ -104,8 +115,12 @@ const asrInputWaveform = document.querySelector('#asrInputWaveform');
 const asrInputFeedback = document.querySelector('#asrInputFeedback');
 const journalTagSettingsList = document.querySelector('#journalTagSettingsList');
 const addJournalTagButton = document.querySelector('#addJournalTagButton');
-const deleteDayDate = document.querySelector('#deleteDayDate');
-const openDeleteDayButton = document.querySelector('#openDeleteDayButton');
+const deleteMultipleDates = document.querySelector('#deleteMultipleDates');
+const deleteStartDate = document.querySelector('#deleteStartDate');
+const deleteStartDateLabel = document.querySelector('#deleteStartDateLabel');
+const deleteEndDate = document.querySelector('#deleteEndDate');
+const deleteEndDateField = document.querySelector('#deleteEndDateField');
+const openDeletePeriodButton = document.querySelector('#openDeletePeriodButton');
 const openResetButton = document.querySelector('#openResetButton');
 const resetModal = document.querySelector('#resetModal');
 const resetTitle = document.querySelector('#resetTitle');
@@ -115,6 +130,7 @@ const cancelResetButton = document.querySelector('#cancelResetButton');
 const confirmResetButton = document.querySelector('#confirmResetButton');
 const resetConfirmCheck = document.querySelector('#resetConfirmCheck');
 const resetConfirmText = document.querySelector('#resetConfirmText');
+const resetDeleteOptions = document.querySelector('#resetDeleteOptions');
 const resetPathList = document.querySelector('#resetPathList');
 const taskEditModal = document.querySelector('#taskEditModal');
 const taskEditForm = document.querySelector('#taskEditForm');
@@ -171,6 +187,19 @@ const journalViewTitle = document.querySelector('#journalViewTitle');
 const journalViewContent = document.querySelector('#journalViewContent');
 const closeJournalViewModalButton = document.querySelector('#closeJournalViewModalButton');
 const closeJournalViewButton = document.querySelector('#closeJournalViewButton');
+const mediaUploadModal = document.querySelector('#mediaUploadModal');
+const mediaUploadQr = document.querySelector('#mediaUploadQr');
+const mediaUploadHint = document.querySelector('#mediaUploadHint');
+const mediaNetworkDebug = document.querySelector('#mediaNetworkDebug');
+const mediaUploadStatus = document.querySelector('#mediaUploadStatus');
+const mediaUploadPreviewList = document.querySelector('#mediaUploadPreviewList');
+const closeMediaUploadModalButton = document.querySelector('#closeMediaUploadModalButton');
+const cancelMediaUploadButton = document.querySelector('#cancelMediaUploadButton');
+const confirmMediaUploadButton = document.querySelector('#confirmMediaUploadButton');
+const mediaViewModal = document.querySelector('#mediaViewModal');
+const mediaViewTitle = document.querySelector('#mediaViewTitle');
+const mediaViewContent = document.querySelector('#mediaViewContent');
+const closeMediaViewModalButton = document.querySelector('#closeMediaViewModalButton');
 const journalUnsavedModal = document.querySelector('#journalUnsavedModal');
 const closeJournalUnsavedModalButton = document.querySelector('#closeJournalUnsavedModalButton');
 const discardJournalChangesButton = document.querySelector('#discardJournalChangesButton');
@@ -182,6 +211,7 @@ const workFocusLength = document.querySelector('#workFocusLength');
 const workBreakLength = document.querySelector('#workBreakLength');
 const breakReminder = document.querySelector('#breakReminder');
 const tutorialButton = document.querySelector('#tutorialButton');
+const refreshStatusButton = document.querySelector('#refreshStatusButton');
 const tutorialConfirmModal = document.querySelector('#tutorialConfirmModal');
 const tutorialConfirmNoButton = document.querySelector('#tutorialConfirmNoButton');
 const tutorialNoButton = document.querySelector('#tutorialNoButton');
@@ -211,11 +241,13 @@ let asrModelDownloadDirectory = '';
 let editingTaskId = '';
 let draggedTaskId = '';
 let deleteMode = 'all';
+let activeMediaAnnotationEditor = null;
 let highlightedTaskId = '';
 let currentEffectiveNow = new Date();
 let lastReminderCheckValue = null;
 let statusTimer = null;
 let tutorialStepIndex = 0;
+let appStatusRefreshInFlight = false;
 let previousTutorialPage = 'tasks';
 let appliedJournalTagFilter = '';
 let appliedJournalSearch = '';
@@ -225,6 +257,9 @@ let taskHistoryOperationInProgress = false;
 let committedProfileStatsStartDate = '';
 let pendingJournalUnsavedResolver = null;
 let journalDateChangePending = false;
+let activeMediaUploadSession = null;
+let pendingMediaItems = [];
+const mediaUrlCache = new Map();
 let asrTestCapture = null;
 let asrTestCaptureUnsubscribe = null;
 let asrTestRecording = false;
@@ -285,7 +320,7 @@ const tutorialSteps = [
     page: 'tasks',
     targetSelector: '#importMoreButton',
     title: '批量创建任务',
-    text: '点击这个按钮，可手动填写或导入文件生成课表，也可以复用前一天或填写每日安排内容。'
+    text: '点击这个按钮，可手动填写或导入文件生成课表，也可以选择特定日期复用任务安排。'
   },
   {
     page: 'records',
@@ -388,6 +423,7 @@ document.querySelectorAll('.date-step-button').forEach((button) => {
 addTodayButtonsToDateInputs();
 
 if (tutorialButton) tutorialButton.addEventListener('click', openTutorialConfirmModal);
+if (refreshStatusButton) refreshStatusButton.addEventListener('click', refreshApplicationStatus);
 if (tutorialConfirmNoButton) tutorialConfirmNoButton.addEventListener('click', closeTutorialConfirmModal);
 if (tutorialNoButton) tutorialNoButton.addEventListener('click', closeTutorialConfirmModal);
 if (tutorialYesButton) tutorialYesButton.addEventListener('click', startTutorial);
@@ -418,7 +454,7 @@ backToCurrentTaskButton.addEventListener('click', async () => {
   if (await confirmLeaveRecordsPageIfNeeded('tasks')) goToCurrentTask();
 });
 if (manualTaskButton) manualTaskButton.addEventListener('click', openImportChoiceModal);
-reusePreviousButton.addEventListener('click', reusePreviousDay);
+if (reusePreviousButton) reusePreviousButton.addEventListener('click', openReuseDateModal);
 if (importFileButton) importFileButton.addEventListener('click', openImportChoiceModal);
 importMoreButton.addEventListener('click', openImportChoiceModal);
 window.addEventListener('keydown', (event) => {
@@ -437,6 +473,9 @@ window.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && !importChoiceModal.classList.contains('hidden')) {
     closeImportChoiceModal();
   }
+  if (event.key === 'Escape' && reuseDateModal && !reuseDateModal.classList.contains('hidden')) {
+    closeReuseDateModal();
+  }
   if (event.key === 'Escape' && !scheduleTableModal.classList.contains('hidden')) {
     closeScheduleTableModal();
   }
@@ -445,6 +484,12 @@ window.addEventListener('keydown', (event) => {
   }
   if (event.key === 'Escape' && !journalViewModal.classList.contains('hidden')) {
     closeJournalViewModal();
+  }
+  if (event.key === 'Escape' && mediaUploadModal && !mediaUploadModal.classList.contains('hidden')) {
+    void closeMediaUploadModal();
+  }
+  if (event.key === 'Escape' && mediaViewModal && !mediaViewModal.classList.contains('hidden')) {
+    closeMediaViewModal();
   }
   if (event.key === 'Escape' && journalUnsavedModal && !journalUnsavedModal.classList.contains('hidden')) {
     resolveJournalUnsavedChoice('cancel');
@@ -465,9 +510,12 @@ function canSaveJournalWithShortcut() {
     resetModal,
     taskEditModal,
     importChoiceModal,
+    reuseDateModal,
     scheduleTableModal,
     dailyPlanTableModal,
     journalViewModal,
+    mediaUploadModal,
+    mediaViewModal,
     journalUnsavedModal,
     tutorialConfirmModal
   ].every((modal) => modal.classList.contains('hidden'));
@@ -516,13 +564,16 @@ if (journalSearchInput) {
 }
 if (showJournalListButton) showJournalListButton.addEventListener('click', () => showRecordsView('list'));
 if (backToJournalEditorButton) backToJournalEditorButton.addEventListener('click', () => showRecordsView('editor'));
+if (openMediaUploadButton) openMediaUploadButton.addEventListener('click', () => void openMediaUploadModal());
 saveJournalButton.addEventListener('click', saveSelectedJournal);
 registerDateInput(journalViewDate, {
   onCommit: () => {
     if (journalFilterMode === 'date') renderJournalListPreservingScroll();
   }
 });
-registerDateInput(deleteDayDate);
+registerDateInput(deleteStartDate);
+registerDateInput(deleteEndDate);
+registerDateInput(reuseSourceDate);
 registerDateInput(termStartDate);
 registerDateInput(termEndDate);
 registerDateInput(dailyPlanDate);
@@ -530,21 +581,38 @@ registerDateInput(dailyPlanStartDate, { onCommit: constrainDailyPlanEndDate });
 registerDateInput(dailyPlanEndDate);
 chooseDataPathButton.addEventListener('click', chooseDataPath);
 if (openDataPathButton) openDataPathButton.addEventListener('click', openDataPath);
+if (chooseMediaDirectoryButton) chooseMediaDirectoryButton.addEventListener('click', chooseMediaDirectory);
+if (openMediaDirectoryButton) openMediaDirectoryButton.addEventListener('click', openMediaDirectory);
 if (changeSettingsPathButton) changeSettingsPathButton.addEventListener('click', chooseDataPath);
 if (openSettingsPathButton) openSettingsPathButton.addEventListener('click', openDataPath);
 if (openModelDirectoryButton) openModelDirectoryButton.addEventListener('click', openModelDirectory);
 if (addJournalTagButton) addJournalTagButton.addEventListener('click', addJournalTag);
-openDeleteDayButton.addEventListener('click', openDeleteDayModal);
+openDeletePeriodButton.addEventListener('click', openDeletePeriodModal);
+if (deleteMultipleDates) deleteMultipleDates.addEventListener('change', updateDeletePeriodFields);
 openResetButton.addEventListener('click', openResetModal);
 closeResetModalButton.addEventListener('click', closeResetModal);
 cancelResetButton.addEventListener('click', closeResetModal);
 resetConfirmCheck.addEventListener('change', () => {
-  confirmResetButton.disabled = !resetConfirmCheck.checked;
+  updateResetConfirmButton();
 });
+if (resetDeleteOptions) {
+  resetDeleteOptions.addEventListener('change', () => {
+    renderResetPaths();
+    updateResetConfirmButton();
+  });
+}
 confirmResetButton.addEventListener('click', confirmReset);
 resetModal.addEventListener('click', (event) => {
   if (event.target === resetModal) closeResetModal();
 });
+if (closeReuseDateModalButton) closeReuseDateModalButton.addEventListener('click', closeReuseDateModal);
+if (cancelReuseDateButton) cancelReuseDateButton.addEventListener('click', closeReuseDateModal);
+if (confirmReuseDateButton) confirmReuseDateButton.addEventListener('click', confirmReuseFromDate);
+if (reuseDateModal) {
+  reuseDateModal.addEventListener('click', (event) => {
+    if (event.target === reuseDateModal) closeReuseDateModal();
+  });
+}
 taskEditForm.addEventListener('submit', saveTaskEdit);
 closeTaskEditModalButton.addEventListener('click', closeTaskEditModal);
 cancelTaskEditButton.addEventListener('click', closeTaskEditModal);
@@ -569,7 +637,10 @@ if (closeDailyPlanVoicePageButton) closeDailyPlanVoicePageButton.addEventListene
 if (openDailyPlanVoicePageButton) openDailyPlanVoicePageButton.addEventListener('click', openDailyPlanVoicePage);
 if (backDailyPlanVoicePageButton) backDailyPlanVoicePageButton.addEventListener('click', closeDailyPlanVoicePage);
 cancelDailyPlanTableButton.addEventListener('click', closeDailyPlanTableModal);
-addDailyPlanRowButton.addEventListener('click', () => addDailyPlanRow());
+addDailyPlanRowButton.addEventListener('click', () => {
+  addDailyPlanRow();
+  focusDailyPlanGridCell(dailyPlanTableBody.querySelectorAll('tr').length - 1, 0);
+});
 saveDailyPlanTableButton.addEventListener('click', saveDailyPlanTable);
 if (dailyPlanVoiceStartButton) dailyPlanVoiceStartButton.addEventListener('click', toggleDailyPlanVoiceInput);
 if (dailyPlanVoiceCancelButton) dailyPlanVoiceCancelButton.addEventListener('click', cancelDailyPlanVoiceInput);
@@ -587,6 +658,24 @@ closeJournalViewButton.addEventListener('click', closeJournalViewModal);
 journalViewModal.addEventListener('click', (event) => {
   if (event.target === journalViewModal) closeJournalViewModal();
 });
+if (closeMediaUploadModalButton) closeMediaUploadModalButton.addEventListener('click', () => void closeMediaUploadModal());
+if (cancelMediaUploadButton) cancelMediaUploadButton.addEventListener('click', () => void closeMediaUploadModal());
+if (confirmMediaUploadButton) confirmMediaUploadButton.addEventListener('click', () => void confirmMediaUpload());
+if (mediaUploadModal) mediaUploadModal.addEventListener('click', (event) => {
+  if (event.target === mediaUploadModal) void closeMediaUploadModal();
+});
+if (closeMediaViewModalButton) closeMediaViewModalButton.addEventListener('click', closeMediaViewModal);
+if (mediaViewModal) mediaViewModal.addEventListener('click', (event) => {
+  if (event.target === mediaViewModal) closeMediaViewModal();
+});
+if (mediaViewContent) mediaViewContent.addEventListener('pointerdown', (event) => {
+  if (activeMediaAnnotationEditor && event.target !== activeMediaAnnotationEditor) activeMediaAnnotationEditor.blur();
+});
+if (window.whbr && window.whbr.media) {
+  window.whbr.media.onUploaded(handleMobileMediaUploaded);
+  window.whbr.media.onNetworkEvent(handleMediaNetworkEvent);
+  window.whbr.media.onSessionExpired(handleMediaUploadExpired);
+}
 [classDuration, classBreakLength, workFocusLength, workBreakLength, breakReminder].forEach((input) => {
   input.addEventListener('change', saveProfileFromForm);
 });
@@ -930,9 +1019,14 @@ function setInputDeviceControlsDisabled(disabled) {
 
 function setInputFeedback(message, state = '') {
   if (!asrInputFeedback) return;
-  asrInputFeedback.textContent = message;
+  asrInputFeedback.classList.remove('hidden');
   asrInputFeedback.classList.toggle('is-active', state === 'active');
   asrInputFeedback.classList.toggle('is-warning', state === 'warning');
+  renderStatusContent(
+    asrInputFeedback,
+    message,
+    state === 'warning' ? () => hideInlineStatus(asrInputFeedback) : null
+  );
 }
 
 function describeMicrophoneError(error) {
@@ -1181,11 +1275,16 @@ function resetJournalVoiceControls() {
 
 function setJournalVoiceStatus(message, state = '') {
   if (!journalVoiceStatus) return;
-  journalVoiceStatus.textContent = message;
+  journalVoiceStatus.classList.remove('hidden');
   const normalizedState = state === true ? 'error' : state;
   journalVoiceStatus.classList.toggle('is-error', normalizedState === 'error');
   journalVoiceStatus.classList.toggle('is-active', normalizedState === 'active');
   journalVoiceStatus.classList.toggle('is-warning', normalizedState === 'warning');
+  renderStatusContent(
+    journalVoiceStatus,
+    message,
+    normalizedState === 'warning' ? () => hideInlineStatus(journalVoiceStatus) : null
+  );
 }
 
 function describeJournalVoiceError(error) {
@@ -1208,6 +1307,13 @@ function formatAsrModelSize(bytes) {
   return `${Math.round((value / 1024 / 1024) * 10) / 10} MB`;
 }
 
+function formatAsrModelName(status = {}) {
+  const modelId = clean(status.modelId);
+  const qwenMatch = modelId.match(/qwen3-asr-([\d.]+[a-z]?)-int8/i);
+  if (qwenMatch) return `Qwen3-ASR ${qwenMatch[1].toUpperCase()}（INT8）`;
+  return modelId || '离线语音模型';
+}
+
 function updateAsrModelStatus(status = {}) {
   latestAsrModelStatus = status;
   if (status.downloadDirectory) {
@@ -1218,17 +1324,18 @@ function updateAsrModelStatus(status = {}) {
   const state = status.state || 'not-installed';
   const progress = status.progress || {};
   const downloadSize = formatAsrModelSize(status.downloadSizeBytes);
-  let message = '未安装。首次使用需要下载离线语音模型。';
+  const modelName = formatAsrModelName(status);
+  let message = `未安装：${modelName}。点击右侧按钮下载。`;
   if (state === 'downloading') {
-    message = '正在下载模型；进度显示在“设置”标题右侧。';
+    message = `正在下载：${modelName}。`;
   } else if (state === 'installed') {
     message = status.source === 'development'
-      ? '已安装（正在使用开发模型目录）。'
-      : '已安装，可离线使用。';
+      ? `已安装：${modelName}（开发模型目录）。`
+      : `已安装：${modelName}。`;
   } else if (state === 'failed') {
-    message = `下载失败：${status.error && status.error.message ? status.error.message : '请检查网络后重试。'}`;
+    message = `未安装：${modelName}。下载失败，请重试。`;
   } else {
-    message = `未安装。首次下载约 ${downloadSize}，完成后即可离线使用。`;
+    message = `未安装：${modelName}（约 ${downloadSize}）。点击右侧按钮下载。`;
   }
   asrModelStatus.textContent = message;
   asrModelStatus.classList.toggle('is-ready', state === 'installed');
@@ -1239,7 +1346,7 @@ function updateAsrModelStatus(status = {}) {
   const canDownload = status.canDownload !== false;
   asrModelDownloadButton.classList.toggle('hidden', state === 'installed' || !canDownload);
   asrModelDownloadButton.disabled = state === 'downloading' || !canDownload;
-  asrModelDownloadButton.textContent = state === 'failed' ? '重试下载' : '下载模型';
+  asrModelDownloadButton.textContent = state === 'failed' ? '重试下载' : `下载 ${modelName}`;
 }
 
 function updateSettingsAsrDownloadProgress(status = latestAsrModelStatus) {
@@ -1262,6 +1369,30 @@ async function refreshAsrModelStatus() {
   } catch (error) {
     updateAsrModelStatus({ state: 'failed', error: { message: error.message || String(error) } });
     return null;
+  }
+}
+
+async function refreshApplicationStatus() {
+  if (appStatusRefreshInFlight) return;
+  appStatusRefreshInFlight = true;
+  if (refreshStatusButton) {
+    refreshStatusButton.disabled = true;
+    refreshStatusButton.classList.add('is-refreshing');
+  }
+
+  try {
+    await Promise.all([
+      refreshAsrModelStatus(),
+      refreshAudioInputDevices(),
+      refreshSystemTime()
+    ]);
+    setStatus('软件状态已刷新。', '', 2500);
+  } finally {
+    appStatusRefreshInFlight = false;
+    if (refreshStatusButton) {
+      refreshStatusButton.disabled = false;
+      refreshStatusButton.classList.remove('is-refreshing');
+    }
   }
 }
 
@@ -2253,6 +2384,7 @@ function openDailyPlanTableModal() {
   setDailyPlanVoiceStatus('尚未开始语音识别。');
   setDailyPlanVoicePageVisible(false);
   dailyPlanTableModal.classList.remove('hidden');
+  requestAnimationFrame(() => focusDailyPlanGridCell(0, 0));
 }
 
 function closeDailyPlanTableModal() {
@@ -2764,7 +2896,20 @@ function addDailyPlanRow(timeRange = '', values = {}) {
   const timeInput = document.createElement('input');
   timeInput.type = 'text';
   timeInput.placeholder = '09:00-11:30';
-  timeInput.value = timeRange;
+  timeInput.value = formatDailyPlanTimeRangeInput(timeRange);
+  timeInput.setAttribute('aria-label', '时间段');
+  timeInput.inputMode = 'numeric';
+  timeInput.addEventListener('focus', () => timeInput.select());
+  timeInput.addEventListener('click', () => timeInput.select());
+  timeInput.addEventListener('beforeinput', (event) => {
+    if (event.inputType === 'insertText' && /\D/.test(event.data || '')) event.preventDefault();
+  });
+  timeInput.addEventListener('input', () => {
+    timeInput.value = formatDailyPlanTimeRangeInput(timeInput.value);
+    timeInput.setSelectionRange(timeInput.value.length, timeInput.value.length);
+  });
+  timeInput.addEventListener('keydown', handleDailyPlanTimeInputKeydown);
+  timeInput.addEventListener('keydown', handleDailyPlanGridKeydown);
   timeCell.appendChild(timeInput);
 
   const titleCell = document.createElement('td');
@@ -2772,6 +2917,8 @@ function addDailyPlanRow(timeRange = '', values = {}) {
   titleInput.type = 'text';
   titleInput.placeholder = '做什么事';
   titleInput.value = clean(values.title);
+  titleInput.setAttribute('aria-label', '任务');
+  titleInput.addEventListener('keydown', handleDailyPlanGridKeydown);
   titleCell.appendChild(titleInput);
 
   const planCell = document.createElement('td');
@@ -2779,10 +2926,14 @@ function addDailyPlanRow(timeRange = '', values = {}) {
   planInput.type = 'text';
   planInput.placeholder = '具体要做什么，可不填';
   planInput.value = clean(values.planDetails);
+  planInput.setAttribute('aria-label', '具体内容');
+  planInput.addEventListener('keydown', handleDailyPlanGridKeydown);
   planCell.appendChild(planInput);
 
   const typeCell = document.createElement('td');
-  typeCell.appendChild(createTypeSelect(values.type || '工作'));
+  const typeSelect = createTypeSelect(values.type || '工作');
+  typeSelect.addEventListener('keydown', handleDailyPlanGridKeydown);
+  typeCell.appendChild(typeSelect);
 
   const actionCell = document.createElement('td');
   actionCell.className = 'row-action-cell';
@@ -2793,10 +2944,114 @@ function addDailyPlanRow(timeRange = '', values = {}) {
   deleteButton.setAttribute('aria-label', '删除这一条任务');
   deleteButton.title = '删除这一条任务';
   deleteButton.addEventListener('click', () => row.remove());
+  deleteButton.addEventListener('keydown', handleDailyPlanGridKeydown);
   actionCell.appendChild(deleteButton);
 
   row.append(timeCell, titleCell, planCell, typeCell, actionCell);
   dailyPlanTableBody.appendChild(row);
+}
+
+function formatDailyPlanTimeRangeInput(value) {
+  const digits = String(value || '').replace(/\D/g, '').slice(0, 8);
+  const accepted = [];
+
+  for (const digit of digits) {
+    const position = accepted.length;
+    const numeric = Number(digit);
+    const isHourTens = position === 0 || position === 4;
+    const isHourOnes = position === 1 || position === 5;
+    const isMinuteTens = position === 2 || position === 6;
+
+    if (isHourTens && numeric > 2) continue;
+    if (isHourOnes && Number(`${accepted[position - 1]}${digit}`) > 23) continue;
+    if (isMinuteTens && numeric > 5) continue;
+    accepted.push(digit);
+  }
+
+  return formatTimeRangeInput(accepted.join(''));
+}
+
+function handleDailyPlanTimeInputKeydown(event) {
+  if (event.key !== 'Backspace') return;
+  event.preventDefault();
+  event.currentTarget.value = '';
+}
+
+function handleDailyPlanGridKeydown(event) {
+  const control = event.currentTarget;
+  const row = control.closest('tr');
+  if (!row) return;
+  const columnIndex = Array.from(row.cells).findIndex((cell) => cell.contains(control));
+  if (columnIndex < 0) return;
+
+  if (control instanceof HTMLSelectElement) {
+    if (event.key === 'Enter') {
+      window.setTimeout(() => focusDailyPlanGridCell(dailyPlanRowIndex(row), columnIndex + 1), 0);
+      return;
+    }
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+      event.preventDefault();
+      focusDailyPlanGridCell(dailyPlanRowIndex(row), columnIndex + (event.key === 'ArrowLeft' ? -1 : 1));
+    }
+    return;
+  }
+
+  if (control instanceof HTMLButtonElement) {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      control.click();
+    }
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      focusDailyPlanGridCell(dailyPlanRowIndex(row), columnIndex - 1);
+    } else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+      event.preventDefault();
+      focusDailyPlanGridCell(dailyPlanRowIndex(row) + (event.key === 'ArrowUp' ? -1 : 1), columnIndex);
+    }
+    return;
+  }
+
+  if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+    event.preventDefault();
+    focusDailyPlanGridCell(dailyPlanRowIndex(row) + (event.key === 'ArrowUp' ? -1 : 1), columnIndex);
+    return;
+  }
+
+  const atLeftEdge = control.selectionStart === 0 && control.selectionEnd === 0;
+  const atRightEdge = control.selectionStart === control.value.length && control.selectionEnd === control.value.length;
+  if (event.key === 'ArrowLeft' && atLeftEdge) {
+    event.preventDefault();
+    focusDailyPlanGridCell(dailyPlanRowIndex(row), columnIndex - 1);
+  } else if (event.key === 'ArrowRight' && atRightEdge) {
+    event.preventDefault();
+    focusDailyPlanGridCell(dailyPlanRowIndex(row), columnIndex + 1);
+  }
+}
+
+function dailyPlanRowIndex(row) {
+  return Array.from(dailyPlanTableBody.querySelectorAll('tr')).indexOf(row);
+}
+
+function focusDailyPlanGridCell(rowIndex, columnIndex) {
+  const rows = Array.from(dailyPlanTableBody.querySelectorAll('tr'));
+  const row = rows[rowIndex];
+  if (!row || columnIndex < 0 || columnIndex >= row.cells.length) return;
+  const control = row.cells[columnIndex].querySelector('input, select, button');
+  if (!control) return;
+
+  control.focus();
+  if (control instanceof HTMLInputElement) {
+    control.select();
+  } else if (control instanceof HTMLSelectElement) {
+    control.value = '工作';
+    control.dispatchEvent(new Event('change', { bubbles: true }));
+    try {
+      if (typeof control.showPicker === 'function') control.showPicker();
+      else control.click();
+    } catch (error) {
+      control.click();
+    }
+  }
 }
 
 function handleDailyPlanDateModeChange() {
@@ -3303,18 +3558,50 @@ async function addTaskForSelectedDate() {
   });
 }
 
-async function reusePreviousDay() {
+function openReuseDateModal() {
+  const targetDate = ensureSelectedDate();
+  const suggestedDate = shiftDate(targetDate, -1);
+  setDateInputValue(reuseSourceDate, suggestedDate);
+  reuseDateDescription.textContent = `将 ${suggestedDate} 或您选定日期的任务安排复制到 ${targetDate}。`;
   closeImportChoiceModal();
-  const date = ensureSelectedDate();
-  const previousDate = shiftDate(date, -1);
+  reuseDateModal.classList.remove('hidden');
+  requestAnimationFrame(() => reuseSourceDate.focus());
+}
+
+function closeReuseDateModal() {
+  reuseDateModal.classList.add('hidden');
+}
+
+async function confirmReuseFromDate() {
+  const sourceDate = normalizeDate(reuseSourceDate.value);
+  const targetDate = ensureSelectedDate();
+  if (!sourceDate) {
+    setStatus('请选择要复用任务安排的日期。', 'error', 4000);
+    return;
+  }
+  if (sourceDate === targetDate) {
+    setStatus('来源日期不能与当前任务日期相同。', 'error', 4000);
+    return;
+  }
+
+  confirmReuseDateButton.disabled = true;
+  try {
+    await reuseTasksFromDate(sourceDate, targetDate);
+    closeReuseDateModal();
+  } finally {
+    confirmReuseDateButton.disabled = false;
+  }
+}
+
+async function reuseTasksFromDate(sourceDate, targetDate) {
   const previousTasks = sortTasksForDisplay(tasks.filter((task) => {
-    return isRenderableTask(task) && normalizeDate(task.date) === previousDate;
+    return isRenderableTask(task) && normalizeDate(task.date) === sourceDate;
   }));
 
   if (previousTasks.length === 0) {
-    activePlanningDates.add(date);
+    activePlanningDates.add(targetDate);
     renderTasks();
-    setStatus(`前一天 ${previousDate} 没有可复用的安排。`, '', 5000);
+    setStatus(`选定日期 ${sourceDate} 没有可复用的安排。`, '', 5000);
     return;
   }
 
@@ -3323,8 +3610,8 @@ async function reusePreviousDay() {
     title: clean(task.title),
     startTime: clean(task.startTime),
     endTime: clean(task.endTime),
-    date,
-    weekday: weekdayFromDate(date),
+    date: targetDate,
+    weekday: weekdayFromDate(targetDate),
     location: clean(task.location),
     type: normalizeTaskType(task.type, task.title),
     planDetails: '',
@@ -3332,15 +3619,15 @@ async function reusePreviousDay() {
     status: '未评价',
     rawText: '',
     sheetName: '',
-    order: nextOrderForDate(date) + index * 10,
+    order: nextOrderForDate(targetDate) + index * 10,
     isDraft: false
   }));
 
   tasks = mergeTasks(tasks, clones);
-  activePlanningDates.add(date);
+  activePlanningDates.add(targetDate);
   await saveState();
   renderTasks();
-  setStatus(`已从 ${previousDate} 复用 ${clones.length} 条安排。`, 'hidden');
+  setStatus(`已从 ${sourceDate} 复用 ${clones.length} 条安排。`, 'hidden');
 }
 
 function createBlankTask(date) {
@@ -3396,6 +3683,9 @@ function createTaskTimeInput(value, label) {
   input.inputMode = 'numeric';
   input.maxLength = 5;
   input.placeholder = '--:--';
+  input.addEventListener('beforeinput', (event) => {
+    if (event.inputType === 'insertText' && /\D/.test(event.data || '')) event.preventDefault();
+  });
   return input;
 }
 
@@ -3423,9 +3713,20 @@ function handleTaskTimeInput(input, nextInput = null) {
 
 function formatTaskTimeInput(value) {
   const digits = clean(value).replace(/\D/g, '').slice(0, 4);
-  if (digits.length === 0) return '';
-  if (digits.length <= 2) return digits.length === 2 ? `${digits}:` : digits;
-  return `${digits.slice(0, 2)}:${digits.slice(2)}`;
+  const accepted = [];
+
+  for (const digit of digits) {
+    const position = accepted.length;
+    const numeric = Number(digit);
+    if (position === 0 && numeric > 2) continue;
+    if (position === 1 && Number(`${accepted[0]}${digit}`) > 23) continue;
+    if (position === 2 && numeric > 5) continue;
+    accepted.push(digit);
+  }
+
+  if (accepted.length === 0) return '';
+  if (accepted.length <= 2) return accepted.length === 2 ? `${accepted.join('')}:` : accepted.join('');
+  return `${accepted.slice(0, 2).join('')}:${accepted.slice(2).join('')}`;
 }
 
 function normalizeTaskTimeInput(value) {
@@ -3837,6 +4138,7 @@ function classifyTaskStage(task, now) {
   if (start === null || end === null) return '';
 
   const current = now.getHours() * 60 + now.getMinutes();
+  if (isAllDayRange(task.startTime, task.endTime)) return 'current';
   if (start === end) return '';
 
   if (end < start) {
@@ -3851,23 +4153,27 @@ function classifyTaskStage(task, now) {
 
 function checkDueReminders(now) {
   const date = formatLocalDate(now);
-  const todayTasks = tasks.filter((task) => isRenderableTask(task) && normalizeDate(task.date) === date);
+  const previousDate = shiftDate(date, -1);
+  const reminderTasks = restoreSplitTaskParents(tasks).filter((task) => (
+    isRenderableTask(task)
+    && [previousDate, date].includes(normalizeDate(task.date))
+  ));
   const currentCheckValue = reminderCheckValue(now);
   const previousCheckValue = lastReminderCheckValue;
   const duePreviousValue = reminderPreviousValue(previousCheckValue, currentCheckValue);
   const dueReminders = [];
   lastReminderCheckValue = currentCheckValue;
 
-  todayTasks.forEach((task, taskIndex) => {
+  reminderTasks.forEach((task, taskIndex) => {
     buildReminderEvents(task).forEach((event) => {
-      const eventCheckValue = dayStartCheckValue(now) + event.minute;
+      const eventCheckValue = reminderDateStartCheckValue(task.date) + event.minute;
       if (!isReminderDue(duePreviousValue, currentCheckValue, eventCheckValue)) return;
-      const key = `${date}|${task.id}|${event.kind}|${event.minute}`;
+      const key = `${eventCheckValue}|${task.id}|${event.kind}`;
       if (firedReminderKeys.has(key)) return;
 
       firedReminderKeys.add(key);
       dueReminders.push({
-        minute: event.minute,
+        checkValue: eventCheckValue,
         priority: reminderEventPriority(event.kind),
         order: Number.isFinite(task.order) ? task.order : taskIndex,
         payload: {
@@ -3879,7 +4185,7 @@ function checkDueReminders(now) {
   });
 
   dueReminders
-    .sort((a, b) => a.minute - b.minute || a.priority - b.priority || a.order - b.order)
+    .sort((a, b) => a.checkValue - b.checkValue || a.priority - b.priority || a.order - b.order)
     .forEach((item) => showReminderMessage(item.payload));
 
   trimOldReminderKeys(date);
@@ -3924,10 +4230,18 @@ function dayStartCheckValue(date) {
   return Math.floor(start.getTime() / 60000);
 }
 
+function reminderDateStartCheckValue(date) {
+  const parsed = parseLocalDate(date);
+  return parsed ? dayStartCheckValue(parsed) : NaN;
+}
+
 function buildReminderEvents(task) {
   const start = timeToMinutes(task.startTime);
   const end = timeToMinutes(task.endTime);
-  if (start === null || end === null || start === end) return [];
+  if (start === null || end === null) return [];
+  const isAllDay = isAllDayRange(task.startTime, task.endTime);
+  if (start === end && !isAllDay) return [];
+  const timelineEnd = isAllDay ? 24 * 60 : (end <= start ? end + (24 * 60) : end);
 
   const profileData = normalizedProfile();
   const type = normalizeTaskType(task.type, task.title);
@@ -3936,8 +4250,8 @@ function buildReminderEvents(task) {
 
   if (type === '课程') {
     addReminderEvent(events, start, 'course-start', `${title} 要上课了，专注听讲。`);
-    addReminderEvent(events, end, 'course-end', `${title} 下课了，休息一下。`);
-    addRepeatingReminderEvents(events, start, end, profileData.classDuration, profileData.classBreakLength, {
+    addReminderEvent(events, timelineEnd, 'course-end', `${title} 下课了，休息一下。`);
+    addRepeatingReminderEvents(events, start, timelineEnd, profileData.classDuration, profileData.classBreakLength, {
       focusKind: 'course-next',
       breakKind: 'course-break',
       focusMessage: `${title} 要继续上课了，专注听讲。`,
@@ -3949,9 +4263,9 @@ function buildReminderEvents(task) {
   if (type === '工作' || type === '学习') {
     const action = type === '学习' ? '学习' : '工作';
     addReminderEvent(events, start, `${type}-start`, `要${action}了，高效专注。`);
-    addReminderEvent(events, end, `${type}-end`, `${title} 结束了，休息一下。`);
+    addReminderEvent(events, timelineEnd, `${type}-end`, `${title} 结束了，休息一下。`);
     if (profileData.breakReminder) {
-      addRepeatingReminderEvents(events, start, end, profileData.workFocusLength, profileData.workBreakLength, {
+      addRepeatingReminderEvents(events, start, timelineEnd, profileData.workFocusLength, profileData.workBreakLength, {
         focusKind: `${type}-focus`,
         breakKind: `${type}-break`,
         focusMessage: `要${action}了，高效专注。`,
@@ -3962,7 +4276,7 @@ function buildReminderEvents(task) {
   }
 
   addReminderEvent(events, start, 'life-start', `${title} 开始了。`);
-  addReminderEvent(events, end, 'life-end', `${title} 结束了，稍微整理一下状态。`);
+  addReminderEvent(events, timelineEnd, 'life-end', `${title} 结束了，稍微整理一下状态。`);
   return dedupeEvents(events);
 }
 
@@ -3985,7 +4299,7 @@ function addRepeatingReminderEvents(events, start, end, focusMinutes, breakMinut
 }
 
 function addReminderEvent(events, minute, kind, message) {
-  if (!Number.isFinite(minute) || minute < 0 || minute >= 24 * 60) return;
+  if (!Number.isFinite(minute) || minute < 0 || minute > 2 * 24 * 60) return;
   events.push({ minute, kind, message });
 }
 
@@ -4008,7 +4322,9 @@ function trimOldReminderKeys(currentDate) {
 function taskDurationMinutes(task) {
   const start = timeToMinutes(task.startTime);
   const end = timeToMinutes(task.endTime);
-  if (start === null || end === null || start === end) return 0;
+  if (start === null || end === null) return 0;
+  if (isAllDayRange(task.startTime, task.endTime)) return 24 * 60;
+  if (start === end) return 0;
   return end > start ? end - start : (24 * 60 - start) + end;
 }
 
@@ -4160,7 +4476,10 @@ function mergeJournals(currentJournals, importedJournals) {
   importedJournals.forEach((journal) => {
     const key = journalIdentity(journal);
     const tagId = normalizeJournalTagId(journal.tagId) || legacyRatingToTagId(journal.rating);
-    if (!key || (!journal.content && !tagId)) return;
+    const media = Array.isArray(journal.media)
+      ? normalizeJournalMedia(journal.media)
+      : normalizeJournalMedia(journalMap.get(key) && journalMap.get(key).media);
+    if (!key || (!journal.content && !tagId && media.length === 0)) return;
 
     journalMap.set(key, {
       id: journal.id || `journal-${Date.now()}`,
@@ -4170,6 +4489,7 @@ function mergeJournals(currentJournals, importedJournals) {
       sheetName: clean(journal.sheetName),
       content: clean(journal.content),
       tagId: normalizeJournalTagId(tagId),
+      media,
       source: clean(journal.source) || 'manual',
       updatedAt: new Date().toISOString()
     });
@@ -4179,7 +4499,45 @@ function mergeJournals(currentJournals, importedJournals) {
 }
 
 function normalizeJournalCollection(items) {
-  return mergeJournals([], items);
+  return removeEmptyJournalEntries(mergeJournals([], items));
+}
+
+function normalizeJournalMedia(media) {
+  if (!Array.isArray(media)) return [];
+  return media.map((item) => {
+    if (!item || typeof item !== 'object') return null;
+    const kind = ['image', 'video', 'live'].includes(item.kind) ? item.kind : 'image';
+    const sourcePath = clean(item.sourcePath);
+    const previewPath = clean(item.previewPath) || sourcePath;
+    if (!sourcePath && !previewPath) return null;
+    return {
+      id: clean(item.id) || `media-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      kind,
+      originalName: clean(item.originalName) || '未命名附件',
+      contentType: clean(item.contentType),
+      size: Number(item.size) || 0,
+      uploadedAt: clean(item.uploadedAt),
+      annotation: clean(item.annotation),
+      mediaRoot: clean(item.mediaRoot),
+      sourcePath,
+      previewPath,
+      thumbnailPath: clean(item.thumbnailPath),
+      motionSourcePath: clean(item.motionSourcePath),
+      motionPreviewPath: clean(item.motionPreviewPath)
+    };
+  }).filter(Boolean);
+}
+
+function journalHasCustomContent(journal) {
+  return Boolean(
+    clean(journal && journal.content)
+    || normalizeJournalTagId(journal && journal.tagId)
+    || normalizeJournalMedia(journal && journal.media).length
+  );
+}
+
+function removeEmptyJournalEntries(items) {
+  return (Array.isArray(items) ? items : []).filter(journalHasCustomContent);
 }
 
 async function saveSelectedJournal() {
@@ -4192,6 +4550,8 @@ async function saveSelectedJournal() {
 async function saveJournalForDate(date) {
   const content = clean(journalContent.value);
   const tagId = normalizeJournalTagId(journalTag ? journalTag.value : '');
+  const existingJournal = findJournalForDate(date, date);
+  const media = normalizeJournalMedia(existingJournal && existingJournal.media);
 
   if (!date) {
     journalSaveState.textContent = '请先选择日期';
@@ -4204,12 +4564,11 @@ async function saveJournalForDate(date) {
     sheetName: '',
     content,
     tagId,
+    media,
     source: 'manual'
   }]);
 
-  if (!content && !tagId) {
-    journals = journals.filter((journal) => journalPrimaryDate(journal) !== date);
-  }
+  journals = removeEmptyJournalEntries(journals);
 
   await saveState();
   renderJournalList();
@@ -4299,6 +4658,360 @@ function resolveJournalUnsavedChoice(choice) {
   resolver(choice);
 }
 
+async function openMediaUploadModal() {
+  const date = committedDateInputValue(journalDate) || normalizeDate(journalDate.value);
+  if (!date) {
+    await window.whbr.showMessageBox({ type: 'warning', title: '请选择日期', message: '请先选择要归档照片的记录日期。' });
+    return;
+  }
+
+  pendingMediaItems = [];
+  if (mediaUploadPreviewList) mediaUploadPreviewList.replaceChildren();
+  if (mediaUploadStatus) mediaUploadStatus.textContent = '正在创建安全的手机上传通道…';
+  if (mediaNetworkDebug) mediaNetworkDebug.textContent = '正在创建并检测本机上传服务…';
+  if (confirmMediaUploadButton) confirmMediaUploadButton.disabled = true;
+  mediaUploadModal.classList.remove('hidden');
+
+  const result = await window.whbr.media.startUploadSession(date);
+  if (!result.ok) {
+    if (mediaUploadStatus) mediaUploadStatus.textContent = result.error && result.error.message ? result.error.message : '无法创建上传通道。';
+    return;
+  }
+
+  activeMediaUploadSession = {
+    id: result.sessionId,
+    date,
+    diagnostics: result.diagnostics || null,
+    networkEvents: Array.isArray(result.networkEvents) ? result.networkEvents : []
+  };
+  mediaUploadQr.src = result.qrDataUrl;
+  mediaUploadQr.hidden = false;
+  if (mediaUploadHint) mediaUploadHint.textContent = '请用与电脑连接同一 Wi‑Fi 的手机扫描二维码，选择相册中的内容后上传。二维码 15 分钟内有效。';
+  if (mediaUploadStatus) mediaUploadStatus.textContent = '等待手机上传…';
+  renderMediaNetworkDebug();
+}
+
+async function closeMediaUploadModal() {
+  const sessionId = activeMediaUploadSession && activeMediaUploadSession.id;
+  activeMediaUploadSession = null;
+  pendingMediaItems = [];
+  if (mediaUploadModal) mediaUploadModal.classList.add('hidden');
+  if (mediaUploadQr) mediaUploadQr.removeAttribute('src');
+  if (sessionId) await window.whbr.media.cancelUpload(sessionId);
+}
+
+function handleMobileMediaUploaded(payload) {
+  if (!activeMediaUploadSession || payload.sessionId !== activeMediaUploadSession.id) return;
+  const received = Array.isArray(payload.items) ? payload.items : [];
+  received.forEach((item) => {
+    if (!pendingMediaItems.some((current) => current.id === item.id)) pendingMediaItems.push({ ...item, annotation: '', removed: false });
+  });
+  renderPendingMediaItems();
+  renderMediaNetworkDebug();
+  if (mediaUploadStatus) mediaUploadStatus.textContent = `已接收 ${pendingMediaItems.filter((item) => !item.removed).length} 个内容，可在右侧填写注释。`;
+  if (confirmMediaUploadButton) confirmMediaUploadButton.disabled = pendingMediaItems.every((item) => item.removed);
+}
+
+function handleMediaNetworkEvent(payload) {
+  if (!activeMediaUploadSession || payload.sessionId !== activeMediaUploadSession.id) return;
+  if (payload.event) activeMediaUploadSession.networkEvents.push(payload.event);
+  if (activeMediaUploadSession.networkEvents.length > 30) activeMediaUploadSession.networkEvents.shift();
+  renderMediaNetworkDebug();
+}
+
+function renderMediaNetworkDebug() {
+  if (!mediaNetworkDebug) return;
+  const session = activeMediaUploadSession;
+  if (!session) {
+    mediaNetworkDebug.textContent = '上传通道尚未创建。请关闭窗口后重新点击“上传照片”。';
+    return;
+  }
+  const diagnostics = session.diagnostics || {};
+  const events = Array.isArray(session.networkEvents) ? session.networkEvents : [];
+  const isPhoneAddress = (address) => address && address !== '127.0.0.1' && address !== '::1' && !address.startsWith('::ffff:127.');
+  const phoneConnected = events.some((event) => event.type === 'page-served' && isPhoneAddress(event.remoteAddress));
+  const phoneRequested = events.some((event) => event.type === 'http-request' && isPhoneAddress(event.remoteAddress));
+  const receivedContent = pendingMediaItems.filter((item) => !item.removed).length;
+  const loopbackReady = diagnostics.loopback && diagnostics.loopback.ok;
+
+  if (!loopbackReady) {
+    mediaNetworkDebug.textContent = '电脑端上传服务没有通过自检，二维码暂时无法使用。请关闭此窗口后重新生成二维码；若仍失败，请检查防火墙是否阻止了日织。';
+  } else if (receivedContent > 0) {
+    mediaNetworkDebug.textContent = `连接正常：已从手机收到 ${receivedContent} 个内容。请在右侧填写注释后点击“确认并保存”。`;
+  } else if (phoneConnected) {
+    mediaNetworkDebug.textContent = '连接正常：手机已成功打开上传页面。现在可在手机上选择内容并点击“上传到电脑”。';
+  } else if (phoneRequested) {
+    mediaNetworkDebug.textContent = '手机正在连接电脑，请稍候；若页面长期无法打开，请确认两台设备在同一 Wi‑Fi，且没有开启会隔离局域网设备的 VPN 或访客网络。';
+  } else {
+    mediaNetworkDebug.textContent = '电脑端上传通道已准备好，正在等待手机扫码连接。若扫码后无法打开页面，请确认手机和电脑连接同一 Wi‑Fi，并关闭会阻断局域网访问的 VPN。';
+  }
+}
+
+function handleMediaUploadExpired(payload) {
+  if (!activeMediaUploadSession || payload.sessionId !== activeMediaUploadSession.id) return;
+  activeMediaUploadSession = null;
+  if (mediaUploadStatus) mediaUploadStatus.textContent = '二维码已过期。请关闭此窗口后重新点击“上传照片”。';
+  if (confirmMediaUploadButton) confirmMediaUploadButton.disabled = true;
+}
+
+function renderPendingMediaItems() {
+  if (!mediaUploadPreviewList) return;
+  mediaUploadPreviewList.replaceChildren();
+  pendingMediaItems.filter((item) => !item.removed).forEach((item) => {
+    const row = document.createElement('div');
+    row.className = 'pending-media-row';
+    row.appendChild(createMediaThumbElement(item, { interactive: false }));
+
+    const detail = document.createElement('div');
+    detail.className = 'pending-media-detail';
+    const name = document.createElement('strong');
+    name.textContent = item.originalName;
+    const type = document.createElement('span');
+    type.className = 'muted';
+    type.textContent = mediaKindLabel(item.kind);
+    const annotation = document.createElement('textarea');
+    annotation.className = 'media-annotation-input';
+    annotation.maxLength = 1000;
+    annotation.placeholder = '为这项内容添加注释（可选）';
+    annotation.value = item.annotation || '';
+    annotation.addEventListener('input', () => { item.annotation = annotation.value; });
+    detail.append(name, type, annotation);
+
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'icon-button media-remove-button';
+    remove.textContent = '×';
+    remove.setAttribute('aria-label', `移除 ${item.originalName}`);
+    remove.addEventListener('click', () => {
+      item.removed = true;
+      renderPendingMediaItems();
+      if (confirmMediaUploadButton) confirmMediaUploadButton.disabled = pendingMediaItems.every((current) => current.removed);
+    });
+    row.append(detail, remove);
+    mediaUploadPreviewList.appendChild(row);
+  });
+}
+
+async function confirmMediaUpload() {
+  if (!activeMediaUploadSession) return;
+  const selected = pendingMediaItems.filter((item) => !item.removed).map((item) => ({ id: item.id, annotation: item.annotation || '' }));
+  if (selected.length === 0) return;
+  confirmMediaUploadButton.disabled = true;
+  if (mediaUploadStatus) mediaUploadStatus.textContent = '正在生成兼容预览并归档到当天文件夹…';
+  const session = activeMediaUploadSession;
+  const result = await window.whbr.media.confirmUpload(session.id, session.date, selected);
+  if (!result.ok) {
+    if (mediaUploadStatus) mediaUploadStatus.textContent = result.error && result.error.message ? result.error.message : '保存失败，请重试。';
+    confirmMediaUploadButton.disabled = false;
+    return;
+  }
+
+  const existing = findJournalForDate(session.date, session.date);
+  const media = [...normalizeJournalMedia(existing && existing.media), ...normalizeJournalMedia(result.media)];
+  journals = mergeJournals(journals, [{
+    id: `journal-${session.date}`,
+    date: session.date,
+    sheetName: '',
+    content: existing ? existing.content : clean(journalContent.value),
+    tagId: existing ? existing.tagId : normalizeJournalTagId(journalTag ? journalTag.value : ''),
+    media,
+    source: 'manual'
+  }]);
+  await saveState();
+  renderJournalList();
+  journalSaveState.textContent = '附件已保存';
+  activeMediaUploadSession = null;
+  pendingMediaItems = [];
+  mediaUploadModal.classList.add('hidden');
+  mediaUploadQr.removeAttribute('src');
+}
+
+function mediaKindLabel(kind) {
+  if (kind === 'video') return '视频（已生成兼容播放版本）';
+  if (kind === 'live') return '实况照片';
+  return '图片';
+}
+
+function createMediaThumbElement(media, options = {}) {
+  const interactive = options.interactive !== false;
+  const element = interactive ? document.createElement('button') : document.createElement('div');
+  element.className = interactive ? 'media-thumbnail-button' : 'media-thumbnail';
+  if (interactive) {
+    element.type = 'button';
+    element.title = `查看 ${media.originalName || '附件'}`;
+    element.addEventListener('click', () => void openMediaViewModal(media));
+  }
+  const image = document.createElement('img');
+  image.alt = media.originalName || mediaKindLabel(media.kind);
+  image.className = 'media-thumbnail-image';
+  const badge = document.createElement('span');
+  badge.className = 'media-kind-badge';
+  badge.textContent = media.kind === 'video' ? '▶' : media.kind === 'live' ? 'LIVE' : '图片';
+  element.append(image, badge);
+  const directUrl = media.thumbnailUrl || '';
+  if (directUrl) image.src = directUrl;
+  else if (media.thumbnailPath) void setMediaImageSource(image, media.thumbnailPath, media.mediaRoot);
+  else element.classList.add('media-thumbnail-fallback');
+  return element;
+}
+
+async function setMediaImageSource(image, relativePath, mediaRoot = '') {
+  const url = await mediaFileUrl(relativePath, mediaRoot);
+  if (url) image.src = url;
+}
+
+async function mediaFileUrl(relativePath, mediaRoot = '') {
+  if (!relativePath) return '';
+  const cacheKey = `${mediaRoot}|${relativePath}`;
+  if (mediaUrlCache.has(cacheKey)) return mediaUrlCache.get(cacheKey);
+  const result = await window.whbr.media.getFileUrl(relativePath, mediaRoot);
+  const url = result && result.ok ? result.url : '';
+  mediaUrlCache.set(cacheKey, url);
+  return url;
+}
+
+async function openMediaViewModal(media) {
+  mediaViewTitle.textContent = media.originalName || '查看内容';
+  mediaViewContent.replaceChildren();
+  if (media.kind === 'live' && window.whbr && window.whbr.media && window.whbr.media.repairLive) {
+    const repair = await window.whbr.media.repairLive(media);
+    if (repair && repair.ok && repair.repaired) mediaUrlCache.clear();
+  }
+  const previewUrl = media.previewUrl || await mediaFileUrl(media.previewPath || media.sourcePath, media.mediaRoot);
+  const motionSourceUrl = await mediaFileUrl(media.motionSourcePath, media.mediaRoot);
+  const motionPreviewUrl = media.motionPreviewUrl || await mediaFileUrl(media.motionPreviewPath, media.mediaRoot);
+  if (media.kind === 'video') {
+    const video = document.createElement('video');
+    video.className = 'media-view-video';
+    video.controls = true;
+    video.preload = 'metadata';
+    video.src = previewUrl;
+    mediaViewContent.appendChild(video);
+  } else if (media.kind === 'live') {
+    const instruction = document.createElement('p');
+    instruction.className = 'media-live-instruction';
+    instruction.textContent = '按住或点击图片可播放完整实况动态；播放结束后会回到静态照片。';
+    const liveStage = document.createElement('div');
+    liveStage.className = 'live-media-stage';
+    const photo = document.createElement('img');
+    photo.src = previewUrl;
+    photo.alt = media.originalName || '实况照片';
+    const motion = document.createElement('video');
+    const primaryMotionUrl = motionSourceUrl || motionPreviewUrl;
+    const compatibilityMotionUrl = motionSourceUrl && motionPreviewUrl && motionSourceUrl !== motionPreviewUrl
+      ? motionPreviewUrl
+      : '';
+    let usingCompatibilityPreview = false;
+    motion.src = primaryMotionUrl;
+    motion.muted = true;
+    motion.loop = false;
+    motion.preload = 'auto';
+    motion.playsInline = true;
+    const resetMotion = () => {
+      motion.classList.remove('is-playing');
+      motion.pause();
+      motion.currentTime = 0;
+    };
+    const startMotion = () => {
+      motion.currentTime = 0;
+      motion.classList.add('is-playing');
+      void motion.play().catch(resetMotion);
+    };
+    const useCompatibilityPreview = () => {
+      if (!compatibilityMotionUrl || usingCompatibilityPreview) {
+        resetMotion();
+        return;
+      }
+      usingCompatibilityPreview = true;
+      const shouldContinuePlaying = motion.classList.contains('is-playing');
+      motion.src = compatibilityMotionUrl;
+      motion.load();
+      if (shouldContinuePlaying) motion.addEventListener('canplay', startMotion, { once: true });
+    };
+    motion.addEventListener('ended', resetMotion);
+    motion.addEventListener('error', useCompatibilityPreview);
+    liveStage.addEventListener('pointerdown', startMotion);
+    liveStage.addEventListener('click', (event) => {
+      if (event.detail === 0) startMotion();
+    });
+    liveStage.append(photo, motion);
+    mediaViewContent.append(instruction, liveStage);
+  } else {
+    const image = document.createElement('img');
+    image.className = 'media-view-image';
+    image.src = previewUrl;
+    image.alt = media.originalName || '图片附件';
+    mediaViewContent.appendChild(image);
+  }
+  const annotationField = document.createElement('label');
+  annotationField.className = 'media-annotation-field';
+  const annotationLabel = document.createElement('span');
+  annotationLabel.textContent = '文字注释（点击空白处自动保存）';
+  const annotation = document.createElement('textarea');
+  annotation.className = 'media-view-annotation';
+  annotation.maxLength = 1000;
+  annotation.placeholder = '为这项内容添加文字注释';
+  annotation.value = media.annotation || '';
+  const annotationStatus = document.createElement('small');
+  annotationStatus.className = 'media-annotation-save-state';
+  let savedAnnotation = annotation.value;
+  annotation.addEventListener('focus', () => {
+    activeMediaAnnotationEditor = annotation;
+  });
+  annotation.addEventListener('blur', () => {
+    if (activeMediaAnnotationEditor === annotation) activeMediaAnnotationEditor = null;
+    void saveMediaAnnotation(media, annotation, annotationStatus, () => savedAnnotation, (value) => { savedAnnotation = value; });
+  });
+  annotationField.append(annotationLabel, annotation, annotationStatus);
+  mediaViewContent.appendChild(annotationField);
+  mediaViewModal.classList.remove('hidden');
+}
+
+async function saveMediaAnnotation(media, input, status, getSavedAnnotation, setSavedAnnotation) {
+  const annotation = input.value.trim().slice(0, 1000);
+  if (annotation === getSavedAnnotation()) return;
+
+  input.disabled = true;
+  status.textContent = '正在保存…';
+  try {
+    const updated = await updateMediaAnnotation(media.id, annotation);
+    if (!updated) throw new Error('没有找到对应附件。');
+    media.annotation = annotation;
+    setSavedAnnotation(annotation);
+    status.textContent = '已保存';
+  } catch (error) {
+    status.textContent = `保存失败：${error.message || '未知错误'}`;
+  } finally {
+    input.disabled = false;
+  }
+}
+
+async function updateMediaAnnotation(mediaId, annotation) {
+  let updated = false;
+  journals = journals.map((journal) => {
+    const currentMedia = normalizeJournalMedia(journal.media);
+    let journalUpdated = false;
+    const nextMedia = currentMedia.map((item) => {
+      if (item.id !== mediaId) return item;
+      updated = true;
+      journalUpdated = true;
+      return { ...item, annotation };
+    });
+    return journalUpdated ? { ...journal, media: nextMedia } : journal;
+  });
+  if (!updated) return false;
+  await saveState();
+  return true;
+}
+
+function closeMediaViewModal() {
+  if (!mediaViewModal) return;
+  if (activeMediaAnnotationEditor) activeMediaAnnotationEditor.blur();
+  activeMediaAnnotationEditor = null;
+  mediaViewModal.classList.add('hidden');
+  mediaViewContent.replaceChildren();
+}
+
 function renderSelectedJournal() {
   const date = clean(journalDate.value);
   const journal = findJournalForDate(normalizeDate(date), date);
@@ -4378,7 +5091,8 @@ function renderJournalList() {
     if (tagBadge) title.appendChild(tagBadge);
     const preview = document.createElement('span');
     preview.className = 'journal-item-preview';
-    preview.textContent = journal.content || '这一天还没有填写生活记录。';
+    const mediaCount = normalizeJournalMedia(journal.media).length;
+    preview.textContent = journal.content || (mediaCount ? `已添加 ${mediaCount} 个照片或视频附件。` : '这一天还没有填写生活记录。');
     item.append(title, preview);
     journalList.appendChild(item);
   });
@@ -4483,8 +5197,21 @@ function renderJournalView(journal, targetDate, fallbackTitle) {
   const journalHeading = document.createElement('h3');
   journalHeading.textContent = '生活记录';
   const journalText = document.createElement('p');
-  journalText.textContent = journal && journal.content ? journal.content : '这一天还没有生活记录。';
+  const journalContentText = journal && journal.content ? journal.content : '这一天还没有生活记录。';
+  journalText.textContent = journalContentText;
   journalSection.append(journalHeading, journalText);
+  if (journalContentText.length > 140) {
+    journalText.classList.add('is-collapsed');
+    const expandButton = document.createElement('button');
+    expandButton.type = 'button';
+    expandButton.className = 'journal-text-expand';
+    expandButton.textContent = '展开';
+    expandButton.addEventListener('click', () => {
+      const expanded = journalText.classList.toggle('is-collapsed');
+      expandButton.textContent = expanded ? '展开' : '收起';
+    });
+    journalSection.appendChild(expandButton);
+  }
   journalViewContent.appendChild(journalSection);
 
   const taskSection = document.createElement('section');
@@ -4514,6 +5241,60 @@ function renderJournalView(journal, targetDate, fallbackTitle) {
   }
 
   journalViewContent.appendChild(taskSection);
+
+  const media = normalizeJournalMedia(journal && journal.media);
+  if (media.length > 0) {
+    const mediaSection = document.createElement('section');
+    mediaSection.className = 'journal-media-section';
+    const mediaHeading = document.createElement('h3');
+    mediaHeading.textContent = '照片与视频';
+    const mediaActions = document.createElement('div');
+    mediaActions.className = 'journal-media-actions';
+    const mediaHint = document.createElement('p');
+    mediaHint.className = 'journal-media-selection-hint';
+    mediaHint.textContent = '勾选附件后可删除一个或多个；点击缩略图可查看内容。';
+    const deleteSelectedButton = document.createElement('button');
+    deleteSelectedButton.type = 'button';
+    deleteSelectedButton.className = 'danger-button journal-media-delete-button';
+    deleteSelectedButton.textContent = '删除所选附件';
+    deleteSelectedButton.disabled = true;
+    const gallery = document.createElement('div');
+    gallery.className = 'journal-media-gallery';
+    const selectedIds = new Set();
+    const updateDeleteButton = () => {
+      deleteSelectedButton.disabled = selectedIds.size === 0;
+      deleteSelectedButton.textContent = selectedIds.size ? `删除所选附件（${selectedIds.size}）` : '删除所选附件';
+    };
+    media.forEach((item) => {
+      const card = document.createElement('div');
+      card.className = 'journal-media-selection';
+      const selectionLabel = document.createElement('label');
+      selectionLabel.className = 'journal-media-selection-check';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.addEventListener('change', () => {
+        if (checkbox.checked) selectedIds.add(item.id);
+        else selectedIds.delete(item.id);
+        updateDeleteButton();
+      });
+      const selectionText = document.createElement('span');
+      selectionText.textContent = '选择';
+      selectionLabel.append(checkbox, selectionText);
+      card.append(selectionLabel, createMediaThumbElement(item));
+      gallery.appendChild(card);
+    });
+    deleteSelectedButton.addEventListener('click', () => void deleteJournalMediaItems(
+      journal,
+      normalizedDate,
+      fallbackTitle,
+      media,
+      selectedIds,
+      deleteSelectedButton
+    ));
+    mediaActions.append(mediaHint, deleteSelectedButton);
+    mediaSection.append(mediaHeading, mediaActions, gallery);
+    journalViewContent.appendChild(mediaSection);
+  }
   journalViewModal.classList.remove('hidden');
 }
 
@@ -5062,14 +5843,14 @@ async function saveState() {
 }
 
 async function chooseDataPath() {
-  const result = await window.whbr.chooseDataPath({ tasks, journals, profile });
-
-  if (result.canceled) {
-    return;
+  try {
+    const result = await window.whbr.chooseDataPath({ tasks, journals, profile });
+    if (result.canceled) return;
+    applyStorageMigrationResult(result);
+    showStorageMigrationStatus(result, '本地数据');
+  } catch (error) {
+    setStatus(`迁移本地数据失败：${error.message || String(error)}`, 'error', 6000);
   }
-
-  storagePaths = result.paths || storagePaths;
-  updateStoragePathView();
 }
 
 async function openDataPath() {
@@ -5079,14 +5860,140 @@ async function openDataPath() {
   }
 }
 
-function openDeleteDayModal() {
-  deleteMode = 'day';
-  if (!deleteDayDate.value) {
-    setDateInputValue(deleteDayDate, taskDateFilter.value || formatLocalDate(new Date()));
+async function deleteJournalMediaItems(journal, targetDate, fallbackTitle, media, selectedIds, deleteButton) {
+  const selectedMedia = media.filter((item) => selectedIds.has(item.id));
+  if (selectedMedia.length === 0) return;
+
+  const response = await window.whbr.showMessageBox({
+    type: 'warning',
+    title: '删除所选附件',
+    message: `确认删除所选的 ${selectedMedia.length} 个照片或视频附件吗？`,
+    detail: '删除后无法恢复，但不会删除这一天的生活记录文字。',
+    buttons: ['删除附件', '取消'],
+    defaultId: 1,
+    cancelId: 1
+  });
+  if (!response || response.response !== 0) return;
+
+  deleteButton.disabled = true;
+  const result = await window.whbr.media.deleteItems(selectedMedia);
+  if (!result || !result.ok) {
+    deleteButton.disabled = false;
+    setStatus(`删除附件失败：${result && result.error && result.error.message ? result.error.message : '未知错误'}`, 'error', 5000);
+    return;
   }
-  resetTitle.textContent = '删除当天数据';
-  resetDescription.textContent = `确认后会删除 ${deleteDayDate.value} 的全部任务安排和每日生活记录。`;
-  resetConfirmText.textContent = `我确认删除 ${deleteDayDate.value} 的数据`;
+
+  const selectedIdSet = new Set(selectedMedia.map((item) => item.id));
+  const identity = journalIdentity(journal);
+  let updatedJournal = null;
+  journals = journals.map((item) => {
+    if (journalIdentity(item) !== identity) return item;
+    updatedJournal = { ...item, media: normalizeJournalMedia(item.media).filter((mediaItem) => !selectedIdSet.has(mediaItem.id)) };
+    return updatedJournal;
+  });
+  if (!updatedJournal) return;
+  journals = removeEmptyJournalEntries(journals);
+  updatedJournal = journals.find((item) => journalIdentity(item) === identity) || null;
+
+  mediaUrlCache.clear();
+  await saveState();
+  renderJournalList();
+  if (updatedJournal) renderJournalView(updatedJournal, targetDate, fallbackTitle);
+  else closeJournalViewModal();
+  setStatus(`已删除 ${selectedMedia.length} 个附件。`, 'hidden');
+}
+
+async function chooseMediaDirectory() {
+  try {
+    const result = await window.whbr.media.chooseDirectory({ tasks, journals, profile });
+    if (!result || result.canceled) return;
+    if (!result.ok) {
+      setStatus(`迁移媒体文件失败：${result.error && result.error.message ? result.error.message : '未知错误'}`, 'error', 5000);
+      return;
+    }
+    applyStorageMigrationResult(result);
+    showStorageMigrationStatus(result, '照片和视频');
+  } catch (error) {
+    setStatus(`迁移媒体文件失败：${error.message || String(error)}`, 'error', 6000);
+  }
+}
+
+function applyStorageMigrationResult(result) {
+  if (result && result.data) {
+    tasks = Array.isArray(result.data.tasks) ? result.data.tasks : tasks;
+    journals = normalizeJournalCollection(result.data.journals || journals);
+    profile = {
+      ...defaultProfile(),
+      ...(result.data.profile || profile)
+    };
+  }
+  storagePaths = result && result.paths ? result.paths : storagePaths;
+  mediaUrlCache.clear();
+  updateStoragePathView();
+}
+
+function showStorageMigrationStatus(result, label) {
+  if (result && result.migration && result.migration.skipped) {
+    setStatus(`${label}存放地址未改变。`, '', 3000);
+    return;
+  }
+  const warnings = result && result.migration && Array.isArray(result.migration.cleanupWarnings)
+    ? result.migration.cleanupWarnings
+    : [];
+  if (warnings.length > 0) {
+    setStatus(`${label}已迁移，但旧位置有部分内容无法删除，请关闭占用文件后手动清理。`, 'error', 7000);
+    return;
+  }
+  setStatus(`${label}已迁移，旧位置中的日织内容已删除。`, '', 5000);
+}
+
+async function openMediaDirectory() {
+  const result = await window.whbr.media.openDirectory();
+  if (result && result.paths) {
+    storagePaths = result.paths;
+    updateStoragePathView();
+  }
+  if (result && result.error) setStatus(`打开媒体文件夹失败：${result.error}`, 'error', 3000);
+}
+
+function updateDeletePeriodFields() {
+  const multipleDates = Boolean(deleteMultipleDates && deleteMultipleDates.checked);
+  deleteEndDateField.classList.toggle('hidden', !multipleDates);
+  deleteStartDateLabel.textContent = multipleDates ? '起始日期' : '删除日期';
+  openDeletePeriodButton.textContent = multipleDates ? '删除选定时期数据' : '删除选定日期数据';
+  if (multipleDates && !deleteEndDate.value) setDateInputValue(deleteEndDate, deleteStartDate.value || formatLocalDate(new Date()));
+}
+
+function getSelectedDeletionPeriod() {
+  const start = normalizeDate(deleteStartDate.value);
+  const end = deleteMultipleDates && deleteMultipleDates.checked
+    ? normalizeDate(deleteEndDate.value)
+    : start;
+  if (!start || !end) return null;
+  if (start > end) return { error: '结束日期不能早于起始日期。' };
+  return { start, end, multipleDates: Boolean(deleteMultipleDates && deleteMultipleDates.checked) };
+}
+
+function formatDeletionPeriod(period) {
+  return period.multipleDates ? `${period.start} 至 ${period.end}` : period.start;
+}
+
+function openDeletePeriodModal() {
+  const period = getSelectedDeletionPeriod();
+  if (!period) {
+    setStatus('请选择有效的删除日期。', 'error', 4000);
+    return;
+  }
+  if (period.error) {
+    setStatus(period.error, 'error', 4000);
+    return;
+  }
+
+  deleteMode = 'period';
+  const periodLabel = formatDeletionPeriod(period);
+  resetTitle.textContent = period.multipleDates ? '删除选定时期数据' : '删除选定日期数据';
+  resetDescription.textContent = `请选择要删除的 ${periodLabel} 数据；仅会删除您勾选的内容。`;
+  resetConfirmText.textContent = `我确认按以上选择删除 ${periodLabel} 的数据`;
   confirmResetButton.textContent = '确认删除';
   openConfirmModal();
 }
@@ -5094,16 +6001,17 @@ function openDeleteDayModal() {
 function openResetModal() {
   deleteMode = 'all';
   resetTitle.textContent = '重置全部数据';
-  resetDescription.textContent = '确认后会清空软件写入的全部本地数据，并清理旧版本浏览器存储。';
-  resetConfirmText.textContent = '我确认重置全部日织数据';
+  resetDescription.textContent = '请选择需要清空的全部本地内容；未勾选的内容会保留。';
+  resetConfirmText.textContent = '我确认按以上选择重置全部数据';
   confirmResetButton.textContent = '确认重置';
   openConfirmModal();
 }
 
 function openConfirmModal() {
   resetConfirmCheck.checked = false;
-  confirmResetButton.disabled = true;
+  renderResetDeleteOptions();
   renderResetPaths();
+  updateResetConfirmButton();
   resetModal.classList.remove('hidden');
 }
 
@@ -5112,40 +6020,95 @@ function closeResetModal() {
 }
 
 async function confirmReset() {
-  if (!resetConfirmCheck.checked) return;
+  const selectedContents = getSelectedResetContents();
+  if (!resetConfirmCheck.checked || selectedContents.length === 0) return;
 
   confirmResetButton.disabled = true;
-  if (deleteMode === 'day') {
-    await deleteSelectedDay();
+  if (deleteMode === 'period') {
+    await deleteSelectedPeriod(selectedContents);
     closeResetModal();
     return;
   }
 
-  const result = await window.whbr.resetData();
+  if (selectedContents.includes('tasks')) tasks = [];
+  if (selectedContents.includes('journals')) journals = [];
+  if (selectedContents.includes('media') && !selectedContents.includes('journals')) {
+    journals = journals.map((journal) => ({ ...journal, media: [] }));
+    journals = removeEmptyJournalEntries(journals);
+  }
+  const result = await window.whbr.resetData({ tasks, journals, profile }, {
+    clearMedia: selectedContents.includes('media')
+  });
   clearLegacyLocalStorage();
-  tasks = [];
-  journals = [];
-  profile = defaultProfile();
   firedReminderKeys.clear();
   storagePaths = result.paths || storagePaths;
   loadProfileToForm();
   updateStoragePathView();
   renderAll();
   closeResetModal();
+  setStatus(`已清空全部${getResetDeleteOptionDefinitions()
+    .filter(([value]) => selectedContents.includes(value))
+    .map(([, label]) => label)
+    .join('、')}。`, 'hidden');
+}
+
+function getResetDeleteOptionDefinitions() {
+  return [
+    ['tasks', '任务安排', deleteMode === 'period' ? '删除选定日期或时期内的任务安排。' : '删除所有日期的任务安排。'],
+    ['journals', '生活记录', deleteMode === 'period' ? '删除选定日期或时期内的生活记录与文字内容。' : '删除全部生活记录与文字内容。'],
+    ['media', '照片和视频附件', deleteMode === 'period' ? '删除选定日期或时期内归档的全部照片、动态图片和视频。' : '删除全部归档的照片、动态图片和视频。']
+  ];
+}
+
+function renderResetDeleteOptions() {
+  if (!resetDeleteOptions) return;
+  resetDeleteOptions.replaceChildren();
+
+  getResetDeleteOptionDefinitions().forEach(([value, label, description]) => {
+    const option = document.createElement('label');
+    option.className = 'reset-delete-option';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.name = 'reset-delete-content';
+    input.value = value;
+    input.checked = true;
+    const text = document.createElement('span');
+    const title = document.createElement('strong');
+    title.textContent = label;
+    const detail = document.createElement('small');
+    detail.textContent = description;
+    text.append(title, detail);
+    option.append(input, text);
+    resetDeleteOptions.appendChild(option);
+  });
+}
+
+function getSelectedResetContents() {
+  if (!resetDeleteOptions) return [];
+  return Array.from(resetDeleteOptions.querySelectorAll('input:checked')).map((input) => input.value);
+}
+
+function updateResetConfirmButton() {
+  confirmResetButton.disabled = !resetConfirmCheck.checked || getSelectedResetContents().length === 0;
 }
 
 function renderResetPaths() {
   resetPathList.innerHTML = '';
+  const selectedLabels = getResetDeleteOptionDefinitions()
+    .filter(([value]) => getSelectedResetContents().includes(value))
+    .map(([, label]) => label)
+    .join('、') || '未选择';
 
-  const rows = deleteMode === 'day'
+  const period = getSelectedDeletionPeriod();
+  const rows = deleteMode === 'period'
     ? [
-        ['删除日期', deleteDayDate.value || '未选择'],
-        ['影响内容', '该日期的任务安排和每日生活记录'],
-        ['数据文件夹', storagePaths.dataDirectory],
-        ['当前月份文件', storagePaths.dataFilePath]
+        ['删除时期', period && !period.error ? formatDeletionPeriod(period) : '未选择'],
+        ['删除内容', selectedLabels]
       ]
     : [
+    ['删除内容', selectedLabels],
     ['数据文件夹', storagePaths.dataDirectory],
+    ['媒体归档文件夹', storagePaths.mediaDirectory],
     ['月度文件命名', storagePaths.dataFilePattern],
     ['设置文件', storagePaths.settingsFilePath],
     ['内部定位文件', storagePaths.settingsLocationPath],
@@ -5164,29 +6127,58 @@ function renderResetPaths() {
   });
 }
 
-async function deleteSelectedDay() {
-  const date = deleteDayDate.value;
-  if (!date) return;
+async function deleteSelectedPeriod(selectedContents) {
+  const period = getSelectedDeletionPeriod();
+  if (!period || period.error) return;
+  const { start, end } = period;
+  const isInPeriod = (date) => {
+    const normalizedDate = normalizeDate(date);
+    return normalizedDate >= start && normalizedDate <= end;
+  };
 
-  tasks = tasks.filter((task) => normalizeDate(task.date) !== date);
-  journals = journals.filter((journal) => {
-    const start = normalizeDate(journal.dateRangeStart || journal.date);
-    const end = normalizeDate(journal.dateRangeEnd || journal.date);
-    const isSingleDay = !end || start === end;
-    return !(isSingleDay && start === date);
-  });
-  activePlanningDates.delete(date);
+  if (selectedContents.includes('tasks')) {
+    tasks = tasks.filter((task) => !isInPeriod(task.date));
+    Array.from(activePlanningDates).forEach((date) => {
+      if (isInPeriod(date)) activePlanningDates.delete(date);
+    });
+  }
+  if (selectedContents.includes('journals')) {
+    journals = journals.filter((journal) => {
+      const journalStart = normalizeDate(journal.dateRangeStart || journal.date);
+      const journalEnd = normalizeDate(journal.dateRangeEnd || journal.date);
+      return !((journalStart || journalEnd) <= end && (journalEnd || journalStart) >= start);
+    });
+  }
+  if (selectedContents.includes('media') && !selectedContents.includes('journals')) {
+    journals = journals.map((journal) => {
+      const journalStart = normalizeDate(journal.dateRangeStart || journal.date);
+      const journalEnd = normalizeDate(journal.dateRangeEnd || journal.date);
+      const overlapsPeriod = (journalStart || journalEnd) <= end && (journalEnd || journalStart) >= start;
+      return overlapsPeriod ? { ...journal, media: [] } : journal;
+    });
+    journals = removeEmptyJournalEntries(journals);
+  }
 
-  if (taskDateFilter.value === date) renderTasks();
-  if (journalDate.value === date) journalContent.value = '';
+  if (isInPeriod(taskDateFilter.value)) renderTasks();
+  if (selectedContents.includes('journals') && isInPeriod(journalDate.value)) journalContent.value = '';
 
-  await saveState();
+  if (selectedContents.includes('media')) {
+    const dates = enumerateDates(start, end);
+    await window.whbr.media.deleteForDates(dates);
+  }
+  const result = await window.whbr.resetData({ tasks, journals, profile });
+  storagePaths = result.paths || storagePaths;
   renderAll();
+  setStatus(`已删除 ${formatDeletionPeriod(period)} 的${getResetDeleteOptionDefinitions()
+    .filter(([value]) => selectedContents.includes(value))
+    .map(([, label]) => label)
+    .join('、')}。`, 'hidden');
 }
 
 function updateStoragePathView() {
   dataFilePath.textContent = storagePaths.dataFilePath || '尚未生成';
   settingsFilePath.textContent = storagePaths.settingsFilePath || '尚未生成';
+  if (mediaDirectoryPath) mediaDirectoryPath.textContent = storagePaths.mediaDirectory || '尚未生成';
   if (modelDownloadPath) modelDownloadPath.textContent = asrModelDownloadDirectory || '加载中...';
 }
 
@@ -5197,22 +6189,10 @@ function clearLegacyLocalStorage() {
 
 function setStatus(message, extraClass, timeoutMs = 0) {
   window.clearTimeout(statusTimer);
-  statusBox.replaceChildren();
   statusBox.className = `status-box ${extraClass || ''}`.trim();
 
   if (!statusBox.classList.contains('hidden')) {
-    const text = document.createElement('span');
-    text.className = 'status-box-message';
-    text.textContent = message;
-
-    const closeButton = document.createElement('button');
-    closeButton.className = 'status-box-close';
-    closeButton.type = 'button';
-    closeButton.textContent = '×';
-    closeButton.title = '关闭提示';
-    closeButton.setAttribute('aria-label', '关闭提示');
-    closeButton.addEventListener('click', hideStatus);
-    statusBox.append(text, closeButton);
+    renderStatusContent(statusBox, message, hideStatus, 'status-box-message', 'status-box-close');
   }
 
   if (timeoutMs > 0) {
@@ -5224,6 +6204,33 @@ function hideStatus() {
   window.clearTimeout(statusTimer);
   statusBox.replaceChildren();
   statusBox.className = 'status-box hidden';
+}
+
+function hideInlineStatus(element) {
+  if (!element) return;
+  element.replaceChildren();
+  element.classList.add('hidden');
+}
+
+function renderStatusContent(element, message, closeHandler = null, messageClass = 'inline-status-message', closeClass = 'inline-status-close') {
+  if (!element) return;
+  element.replaceChildren();
+
+  const text = document.createElement('span');
+  text.className = messageClass;
+  text.textContent = message;
+  element.appendChild(text);
+
+  if (!closeHandler) return;
+
+  const closeButton = document.createElement('button');
+  closeButton.className = closeClass;
+  closeButton.type = 'button';
+  closeButton.textContent = '×';
+  closeButton.title = '关闭提示';
+  closeButton.setAttribute('aria-label', '关闭提示');
+  closeButton.addEventListener('click', closeHandler);
+  element.appendChild(closeButton);
 }
 
 function clean(value) {
@@ -5243,7 +6250,9 @@ async function startApp() {
   const today = formatLocalDate(new Date());
   setDateInputValue(journalDate, today);
   setDateInputValue(taskDateFilter, today);
-  setDateInputValue(deleteDayDate, today);
+  setDateInputValue(deleteStartDate, today);
+  setDateInputValue(deleteEndDate, today);
+  updateDeletePeriodFields();
   committedProfileStatsStartDate = today;
   setDateInputValue(profileStatsStartDate, today);
 

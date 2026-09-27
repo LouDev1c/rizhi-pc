@@ -1,15 +1,20 @@
 const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeImage, screen, shell } = require('electron');
+const http = require('http');
+const os = require('os');
+const crypto = require('crypto');
+const { spawn } = require('child_process');
 const path = require('path');
 const { pathToFileURL } = require('url');
 const fsSync = require('fs');
 const fs = require('fs/promises');
 const { parseScheduleFile } = require('./src/parsers/scheduleParser');
 const { parseTaskTextList } = require('./src/parsers/taskTextParser');
-const { getStoragePaths, loadData, resetData, saveData, setStorageDirectory } = require('./src/storage/localDataStore');
+const { getStoragePaths, loadData, resetData, saveData, setStorageDirectory, setMediaDirectory } = require('./src/storage/localDataStore');
 const { autoUpdater } = require('electron-updater');
-const { ASR_MODEL_CONFIG } = require('./src/asr/asrModelConfig');
 const { createAsrModelManager } = require('./src/asr/modelManager');
 const { createAsrService } = require('./src/asr/asrService');
+const QRCode = require('qrcode');
+const ffmpegStaticPath = require('ffmpeg-static');
 
 const scheduleFileExtensions = ['xlsx', 'xls', 'csv', 'tsv'];
 const allowedExtensions = new Set(scheduleFileExtensions.map((extension) => `.${extension}`));
@@ -24,6 +29,10 @@ let isQuitting = false;
 let isClosePromptShowing = false;
 let isUpdatePromptShowing = false;
 let asrService = null;
+const mediaUploadSessions = new Map();
+const MEDIA_UPLOAD_MAX_BYTES = 350 * 1024 * 1024;
+const MEDIA_IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.avif', '.tif', '.tiff', '.heic', '.heif']);
+const MEDIA_VIDEO_EXTENSIONS = new Set(['.mp4', '.m4v', '.mov', '.webm', '.mkv', '.avi', '.3gp']);
 
 if (process.platform === 'win32') {
   app.setAppUserModelId('com.rizhi.pc');
@@ -224,6 +233,9 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   isQuitting = true;
+  for (const sessionId of mediaUploadSessions.keys()) {
+    void closeMediaUploadSession(sessionId, { removeStaging: false });
+  }
   if (asrService) void asrService.dispose();
 });
 
@@ -438,10 +450,12 @@ function configureMicrophonePermissionPolicy(window) {
 function getAsrService() {
   if (asrService) return asrService;
 
-  const developmentModelDirectory = app.isPackaged
-    ? ''
-    : path.join(__dirname, 'dev_models', ASR_MODEL_CONFIG.modelId);
-    const modelManager = createAsrModelManager({ app, developmentModelDirectory });
+  // Development builds use the regular user-data model directory by default.
+  // A separate development model can still be selected explicitly with
+  // RIZHI_ASR_MODEL_DIR; silently preferring a project-local directory made the
+  // settings screen report a model as installed after the downloaded copy had
+  // been removed.
+  const modelManager = createAsrModelManager({ app });
     asrService = createAsrService({ app, modelManager });
     asrService.on('partial-result', (payload) => sendAsrEvent('asr:partial', payload));
     asrService.on('final-result', (payload) => sendAsrEvent('asr:final', payload));
@@ -497,6 +511,747 @@ ipcMain.handle('app:getIconUrl', () => {
 ipcMain.handle('app:getVersion', () => {
   return app.getVersion();
 });
+
+ipcMain.handle('media:startUploadSession', async (event, payload = {}) => {
+  if (!isMainWindowSender(event)) return mediaError('MEDIA_IPC_DENIED', '不允许的媒体上传请求。');
+  try {
+    return await startMediaUploadSession(payload.date);
+  } catch (error) {
+    console.error('RiZhi media upload session error:', error);
+    return mediaError('MEDIA_SESSION_ERROR', error.message || '无法创建手机上传通道。');
+  }
+});
+
+ipcMain.handle('media:confirmUpload', async (event, payload = {}) => {
+  if (!isMainWindowSender(event)) return mediaError('MEDIA_IPC_DENIED', '不允许的媒体上传请求。');
+  try {
+    return await confirmMediaUpload(payload.sessionId, payload.date, payload.entries);
+  } catch (error) {
+    console.error('RiZhi media confirmation error:', error);
+    return mediaError('MEDIA_CONFIRM_ERROR', error.message || '媒体归档失败。');
+  }
+});
+
+ipcMain.handle('media:cancelUpload', async (event, sessionId) => {
+  if (!isMainWindowSender(event)) return mediaError('MEDIA_IPC_DENIED', '不允许的媒体上传请求。');
+  await closeMediaUploadSession(String(sessionId || ''), { removeStaging: true });
+  return { ok: true };
+});
+
+ipcMain.handle('media:deleteForDates', async (event, dates = []) => {
+  if (!isMainWindowSender(event)) return mediaError('MEDIA_IPC_DENIED', '不允许删除媒体文件。');
+  const selectedDates = [...new Set(Array.isArray(dates) ? dates.map((date) => String(date || '')) : [])];
+  if (selectedDates.length === 0 || selectedDates.some((date) => !isValidMediaDate(date))) {
+    return mediaError('MEDIA_INVALID_DATE', '日期无效。');
+  }
+  const paths = await getStoragePaths(app);
+  for (const date of selectedDates) {
+    const directory = path.join(paths.mediaDirectory, date.slice(0, 7), date);
+    await fs.rm(directory, { recursive: true, force: true });
+    const legacyDirectory = path.join(paths.dataDirectory, 'images', date.slice(0, 7), date);
+    if (path.resolve(legacyDirectory) !== path.resolve(directory)) {
+      await fs.rm(legacyDirectory, { recursive: true, force: true });
+    }
+  }
+  return { ok: true, dates: selectedDates };
+});
+
+ipcMain.handle('media:deleteItems', async (event, mediaItems = []) => {
+  if (!isMainWindowSender(event)) return mediaError('MEDIA_IPC_DENIED', '不允许删除媒体文件。');
+  const items = Array.isArray(mediaItems) ? mediaItems.filter((item) => item && typeof item === 'object') : [];
+  if (items.length === 0) return mediaError('MEDIA_INVALID_ITEMS', '没有可删除的附件。');
+
+  let removedCount = 0;
+  for (const item of items) {
+    const mediaRoot = String(item.mediaRoot || '');
+    const paths = [item.sourcePath, item.previewPath, item.thumbnailPath, item.motionSourcePath, item.motionPreviewPath]
+      .map((value) => String(value || ''))
+      .filter(Boolean);
+    for (const relativePath of [...new Set(paths)]) {
+      try {
+        const filePath = await resolveStoredMediaPath(relativePath, mediaRoot);
+        await fs.rm(filePath, { force: true });
+        removedCount += 1;
+      } catch {
+        // The record still needs to be removed when one derivative file is already absent.
+      }
+    }
+  }
+  return { ok: true, removedCount };
+});
+
+ipcMain.handle('media:repairLive', async (event, media = {}) => {
+  if (!isMainWindowSender(event)) return mediaError('MEDIA_IPC_DENIED', '不允许修复媒体文件。');
+  try {
+    return await repairStoredLiveMedia(media);
+  } catch (error) {
+    return mediaError('MEDIA_REPAIR_ERROR', error.message || '无法修复实况照片。');
+  }
+});
+
+ipcMain.handle('media:chooseDirectory', async (event, data) => {
+  if (!isMainWindowSender(event)) return mediaError('MEDIA_IPC_DENIED', '不允许更改媒体文件夹。');
+  const result = await dialog.showOpenDialog({
+    title: '选择照片和视频归档文件夹',
+    properties: ['openDirectory', 'createDirectory']
+  });
+  if (result.canceled || result.filePaths.length === 0) return { ok: true, canceled: true };
+  const oldPaths = await getStoragePaths(app);
+  const targetDirectory = path.resolve(result.filePaths[0]);
+  if (path.resolve(oldPaths.mediaDirectory) !== targetDirectory) {
+    const confirmation = await dialog.showMessageBox(mainWindow || undefined, {
+      type: 'warning',
+      title: '迁移照片和视频',
+      message: '是否将已有照片和视频迁移到新文件夹？',
+      detail: `迁移成功后会删除旧归档文件夹中的日织媒体内容。\n\n旧位置：${oldPaths.mediaDirectory}\n新位置：${targetDirectory}`,
+      buttons: ['迁移并清理旧位置', '取消'],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true
+    });
+    if (confirmation.response !== 0) return { ok: true, canceled: true };
+  }
+  return { ok: true, canceled: false, ...(await setMediaDirectory(app, targetDirectory, data)) };
+});
+
+ipcMain.handle('media:openDirectory', async (event) => {
+  if (!isMainWindowSender(event)) return mediaError('MEDIA_IPC_DENIED', '不允许打开媒体文件夹。');
+  const paths = await getStoragePaths(app);
+  await fs.mkdir(paths.mediaDirectory, { recursive: true });
+  const error = await shell.openPath(paths.mediaDirectory);
+  return { ok: !error, error, paths };
+});
+
+ipcMain.handle('media:getFileUrl', async (event, relativePath, mediaRoot) => {
+  if (!isMainWindowSender(event)) return mediaError('MEDIA_IPC_DENIED', '不允许读取媒体文件。');
+  try {
+    const mediaPath = await resolveStoredMediaPath(relativePath, mediaRoot);
+    return { ok: true, url: pathToFileURL(mediaPath).toString() };
+  } catch (error) {
+    return mediaError('MEDIA_FILE_NOT_FOUND', '媒体文件不存在或无法读取。');
+  }
+});
+
+function mediaError(code, message) {
+  return { ok: false, error: { code, message } };
+}
+
+function isValidMediaDate(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
+}
+
+async function startMediaUploadSession(date) {
+  if (!isValidMediaDate(date)) throw new Error('请先选择有效的记录日期。');
+
+  for (const existingSession of mediaUploadSessions.values()) {
+    await closeMediaUploadSession(existingSession.id, { removeStaging: true });
+  }
+
+  const paths = await getStoragePaths(app);
+  const sessionId = crypto.randomUUID();
+  const token = crypto.randomBytes(24).toString('base64url');
+  const stagingDirectory = path.join(paths.dataDirectory, '.upload-staging', sessionId);
+  await fs.mkdir(stagingDirectory, { recursive: true });
+
+  const session = {
+    id: sessionId,
+    token,
+    date,
+    stagingDirectory,
+    items: [],
+    server: null,
+    diagnostics: null,
+    networkEvents: [],
+    expiresAt: Date.now() + 15 * 60 * 1000,
+    expiryTimer: null
+  };
+  const server = http.createServer((request, response) => {
+    void handleMediaUploadRequest(session, request, response);
+  });
+  server.on('connection', (socket) => {
+    recordMediaNetworkEvent(session, 'tcp-connection', {
+      remoteAddress: socket.remoteAddress || '',
+      remotePort: socket.remotePort || 0
+    });
+  });
+  server.on('clientError', (error, socket) => {
+    recordMediaNetworkEvent(session, 'client-error', {
+      remoteAddress: socket && socket.remoteAddress ? socket.remoteAddress : '',
+      error: error.message
+    });
+  });
+  session.server = server;
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '0.0.0.0', () => {
+      server.off('error', reject);
+      resolve();
+    });
+  });
+
+  const address = server.address();
+  const port = typeof address === 'object' && address ? address.port : 0;
+  const candidates = getLanAddressCandidates();
+  const selectedCandidate = findLanAddress(candidates);
+  const host = selectedCandidate.address;
+  if (!host || !port) {
+    await closeServer(server);
+    throw new Error('没有发现可供手机访问的局域网地址，请确认电脑已连接 Wi-Fi 或有线网络。');
+  }
+
+  session.uploadUrl = `http://${host}:${port}/upload/${token}`;
+  mediaUploadSessions.set(sessionId, session);
+  const loopback = await probeMediaUploadServer(port, `/upload/${token}`);
+  session.diagnostics = {
+    listenAddress: '0.0.0.0',
+    port,
+    selectedAddress: host,
+    selectedInterface: selectedCandidate.name,
+    selectedReason: selectedCandidate.reason,
+    candidates,
+    loopback
+  };
+  session.qrDataUrl = await QRCode.toDataURL(session.uploadUrl, {
+    width: 360,
+    margin: 2,
+    errorCorrectionLevel: 'M',
+    color: { dark: '#18212b', light: '#ffffff' }
+  });
+  session.expiryTimer = setTimeout(() => {
+    void closeMediaUploadSession(sessionId, { removeStaging: true });
+    sendMediaUploadEvent('media:sessionExpired', { sessionId });
+  }, 15 * 60 * 1000);
+  return {
+    ok: true,
+    sessionId,
+    uploadUrl: session.uploadUrl,
+    qrDataUrl: session.qrDataUrl,
+    expiresAt: session.expiresAt,
+    diagnostics: session.diagnostics,
+    networkEvents: session.networkEvents
+  };
+}
+
+function getLanAddressCandidates() {
+  return Object.entries(os.networkInterfaces()).flatMap(([name, items]) => (items || [])
+    .filter((item) => item && item.family === 'IPv4' && !item.internal)
+    .map((item) => {
+      const normalizedName = name.toLowerCase();
+      const isVirtualOrVpn = /(vpn|tap|tun|wintun|tailscale|zerotier|vmware|virtual|v-ethernet|hyper-v)/.test(normalizedName);
+      const isPhysical = /(wi-?fi|wlan|wireless|ethernet|以太网|本地连接)/.test(normalizedName);
+      return {
+      name,
+      address: item.address,
+      netmask: item.netmask,
+      mac: item.mac,
+      private: /^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(item.address),
+      isVirtualOrVpn,
+      isPhysical
+      };
+    }));
+}
+
+function findLanAddress(candidates = getLanAddressCandidates()) {
+  const ranked = [...candidates].sort((left, right) => candidateRank(left) - candidateRank(right));
+  const selected = ranked[0] || { address: '', name: '', reason: '未发现可用 IPv4 地址。' };
+  return {
+    ...selected,
+    reason: selected.isPhysical ? '优先选择物理 Wi‑Fi/以太网网卡。' : selected.isVirtualOrVpn ? '未发现物理局域网网卡，使用 VPN/虚拟网卡。' : '使用首个可用 IPv4 网卡。'
+  };
+}
+
+function candidateRank(item) {
+  if (item.private && item.isPhysical) return 0;
+  if (item.private && !item.isVirtualOrVpn) return 1;
+  if (item.private) return 2;
+  if (item.isPhysical) return 3;
+  return 4;
+}
+
+function probeMediaUploadServer(port, requestPath) {
+  const startedAt = Date.now();
+  return new Promise((resolve) => {
+    const request = http.get({ host: '127.0.0.1', port, path: requestPath, timeout: 3000 }, (response) => {
+      response.resume();
+      resolve({ ok: response.statusCode === 200, statusCode: response.statusCode || 0, durationMs: Date.now() - startedAt });
+    });
+    request.once('timeout', () => request.destroy(new Error('本机回环测试超时。')));
+    request.once('error', (error) => resolve({ ok: false, statusCode: 0, durationMs: Date.now() - startedAt, error: error.message }));
+  });
+}
+
+function recordMediaNetworkEvent(session, type, details = {}) {
+  const event = { type, at: new Date().toISOString(), ...details };
+  session.networkEvents.push(event);
+  if (session.networkEvents.length > 30) session.networkEvents.shift();
+  console.log('RiZhi media network:', event);
+  sendMediaUploadEvent('media:networkEvent', { sessionId: session.id, event });
+}
+
+async function handleMediaUploadRequest(session, request, response) {
+  const expectedPath = `/upload/${session.token}`;
+  recordMediaNetworkEvent(session, 'http-request', {
+    method: request.method || '',
+    path: request.url || '',
+    remoteAddress: request.socket.remoteAddress || '',
+    userAgent: String(request.headers['user-agent'] || '').slice(0, 160)
+  });
+  if (Date.now() > session.expiresAt) {
+    recordMediaNetworkEvent(session, 'response', { statusCode: 410, reason: 'expired' });
+    return sendUploadResponse(response, 410, '上传二维码已过期，请回到电脑端重新生成。');
+  }
+  if (request.url !== expectedPath) {
+    recordMediaNetworkEvent(session, 'response', { statusCode: 404, reason: 'path-mismatch' });
+    return sendUploadResponse(response, 404, '未找到上传页面。');
+  }
+
+  if (request.method === 'GET') {
+    recordMediaNetworkEvent(session, 'page-served', { statusCode: 200, remoteAddress: request.socket.remoteAddress || '' });
+    response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+    response.end(createMobileUploadPage());
+    return;
+  }
+  if (request.method !== 'POST') return sendUploadResponse(response, 405, '仅支持上传请求。');
+
+  try {
+    const files = await readMultipartUpload(request);
+    if (files.length === 0) throw new Error('没有检测到可上传的照片或视频。');
+    const uploadedItems = await stageMobileMediaFiles(session, files);
+    sendMediaUploadEvent('media:uploaded', { sessionId: session.id, items: uploadedItems });
+    sendUploadResponse(response, 200, `已传送 ${uploadedItems.length} 个内容。请回到电脑端填写注释并确认保存。`, true);
+  } catch (error) {
+    console.error('RiZhi mobile media upload error:', error);
+    sendUploadResponse(response, 400, error.message || '上传失败，请重试。');
+  }
+}
+
+function createMobileUploadPage() {
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>日织 · 上传照片</title>
+  <style>
+    body{margin:0;padding:28px 20px;background:#f4f6f8;color:#18212b;font-family:-apple-system,BlinkMacSystemFont,"Microsoft YaHei",sans-serif}
+    main{max-width:440px;margin:auto;padding:24px;border-radius:16px;background:#fff;box-shadow:0 12px 36px rgba(24,33,43,.12)}
+    h1{margin:0 0 8px;font-size:22px}p{margin:0;color:#53606d;line-height:1.7}input{display:none}.guides{display:grid;gap:10px;margin-top:16px}.guide{padding:12px;border:1px solid #dce4ea;border-radius:10px;background:#fbfcfd}.guide strong{display:block;margin-bottom:4px;color:#334554;font-size:14px}.guide p{font-size:13px}.guide em{font-style:normal;color:#176a47;font-weight:700}button{width:100%;min-height:50px;margin-top:14px;border:0;border-radius:10px;background:#1f7a57;color:#fff;font:inherit;font-weight:700}button:disabled{opacity:.55}.secondary{border:1px solid #91b3a5;background:#f4fbf7;color:#176a47}.status{min-height:24px;margin-top:14px;color:#53606d;text-align:center;font-size:14px}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>上传到日织</h1>
+    <p>一次可选择多张图片、动态照片、实况照片或视频。上传后可在电脑端逐项添加注释。</p>
+    <div class="guides">
+      <section class="guide"><strong>Android 上传指引</strong><p>点击“选择内容”会直接打开系统相册，可一次多选照片和视频。动态照片请优先选择相册里的原始内容，不要选择微信、QQ 等应用生成的副本；若相册只提供静态图，可从系统菜单切换到<em>文件管理</em>，选择 DCIM/Camera 中的原文件。</p></section>
+      <section class="guide"><strong>iPhone 上传指引</strong><p>普通图片和视频可从照片选择。实况照片请先导出“未修改的原件/所有照片数据”到<em>文件</em>，再一次选中同名图片和 MOV；若系统只提供 JPEG，将只能作为静态图片上传。</p></section>
+    </div>
+    <input id="files" type="file" multiple accept="image/*,video/*,.heic,.heif,.avif,.mov,.m4v,.mkv,.avi,.3gp">
+    <button id="choose" class="secondary" type="button">选择内容</button>
+    <button id="submit" type="button" disabled>上传到电脑</button>
+    <div id="status" class="status" role="status">尚未选择内容</div>
+  </main>
+  <script>
+    const files=document.querySelector('#files'),choose=document.querySelector('#choose'),submit=document.querySelector('#submit'),status=document.querySelector('#status');
+    choose.addEventListener('click',()=>{files.value='';files.click()});
+    files.addEventListener('change',()=>{const count=files.files.length;submit.disabled=!count;status.textContent=count?'已选择 '+count+' 个文件，可点击“上传到电脑”。':'尚未选择内容'});
+    submit.addEventListener('click',async()=>{const chosen=Array.from(files.files||[]);if(!chosen.length){status.textContent='请先选择至少一个内容。';return}submit.disabled=true;choose.disabled=true;status.textContent='正在上传，请不要关闭此页面…';try{const data=new FormData();chosen.forEach(file=>data.append('files',file,file.name));const response=await fetch(location.href,{method:'POST',body:data});status.textContent=await response.text();if(response.ok){files.value='';}}catch(error){status.textContent='上传失败，请确认手机与电脑连接同一网络后重试。'}finally{choose.disabled=false;submit.disabled=!files.files.length}});
+  </script>
+</body>
+</html>`;
+}
+
+function sendUploadResponse(response, statusCode, message, success = false) {
+  response.writeHead(statusCode, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+  response.end(message || (success ? '上传成功。' : '上传失败。'));
+}
+
+function readMultipartUpload(request) {
+  return new Promise((resolve, reject) => {
+    const contentType = String(request.headers['content-type'] || '');
+    const boundaryMatch = contentType.match(/boundary=([^;]+)/i);
+    if (!boundaryMatch) return reject(new Error('上传格式不正确，请重新选择内容。'));
+    const chunks = [];
+    let total = 0;
+    request.on('data', (chunk) => {
+      total += chunk.length;
+      if (total > MEDIA_UPLOAD_MAX_BYTES) {
+        request.destroy(new Error('单次上传不能超过 350 MB。'));
+        return;
+      }
+      chunks.push(chunk);
+    });
+    request.on('error', reject);
+    request.on('end', () => {
+      try {
+        resolve(parseMultipartFiles(Buffer.concat(chunks), boundaryMatch[1].replace(/^"|"$/g, '')));
+      } catch (error) {
+        reject(error);
+      }
+    });
+  });
+}
+
+function parseMultipartFiles(buffer, boundary) {
+  const delimiter = Buffer.from(`--${boundary}`);
+  const separator = Buffer.from(`\r\n--${boundary}`);
+  const files = [];
+  let cursor = buffer.indexOf(delimiter);
+  while (cursor !== -1) {
+    cursor += delimiter.length;
+    if (buffer.subarray(cursor, cursor + 2).toString() === '--') break;
+    if (buffer.subarray(cursor, cursor + 2).toString() === '\r\n') cursor += 2;
+    const headerEnd = buffer.indexOf(Buffer.from('\r\n\r\n'), cursor);
+    if (headerEnd === -1) break;
+    const headers = buffer.subarray(cursor, headerEnd).toString('utf8');
+    const next = buffer.indexOf(separator, headerEnd + 4);
+    if (next === -1) break;
+    const disposition = headers.match(/content-disposition:[^\r\n]*filename="([^"]*)"/i);
+    if (disposition && disposition[1]) {
+      const fieldName = (headers.match(/(?:^|;)\s*name="([^"]*)"/im) || [])[1] || 'files';
+      const type = (headers.match(/content-type:\s*([^\r\n]+)/i) || [])[1] || '';
+      files.push({ name: decodeUploadFilename(disposition[1]), fieldName, contentType: type.trim(), data: buffer.subarray(headerEnd + 4, next) });
+    }
+    cursor = next + 2;
+  }
+  return files;
+}
+
+function decodeUploadFilename(value) {
+  try { return decodeURIComponent(value); } catch { return value; }
+}
+
+async function stageMobileMediaFiles(session, files) {
+  const candidates = [];
+  for (const file of files) {
+    const extension = path.extname(file.name || '').toLowerCase();
+    const kind = mediaKindForExtension(extension);
+    if (!kind) continue;
+    const id = crypto.randomUUID();
+    const originalName = safeMediaFileName(file.name, extension);
+    const storedName = `${id}${extension}`;
+    const sourcePath = path.join(session.stagingDirectory, storedName);
+    await fs.writeFile(sourcePath, file.data);
+    candidates.push({ id, kind, originalName, extension, contentType: file.contentType, sourcePath, sourceName: storedName, size: file.data.length, uploadedAt: new Date().toISOString() });
+  }
+  if (candidates.length === 0) throw new Error('暂不支持所选文件格式。支持常见图片、动态图和视频格式。');
+
+  const pairedIds = new Set();
+  const result = [];
+  for (const image of candidates.filter((item) => item.kind === 'image')) {
+    const baseName = mediaBaseName(image.originalName);
+    const motion = candidates.find((item) => item.kind === 'video'
+      && !pairedIds.has(item.id)
+      && mediaBaseName(item.originalName) === baseName);
+    if (motion && isLivePhotoImage(image.extension)) {
+      pairedIds.add(image.id);
+      pairedIds.add(motion.id);
+      result.push(await prepareLivePhotoMedia(session, image, motion));
+    }
+  }
+  for (const item of candidates) {
+    if (pairedIds.has(item.id)) continue;
+    result.push(await prepareSingleMedia(session, item));
+  }
+  session.items.push(...result);
+  return result.map(serializeStagedMedia);
+}
+
+function mediaKindForExtension(extension) {
+  if (MEDIA_IMAGE_EXTENSIONS.has(extension)) return 'image';
+  if (MEDIA_VIDEO_EXTENSIONS.has(extension)) return 'video';
+  return '';
+}
+
+function isLivePhotoImage(extension) {
+  return ['.heic', '.heif', '.jpg', '.jpeg'].includes(extension);
+}
+
+function mediaBaseName(name) {
+  return path.basename(name, path.extname(name)).replace(/[\s_\-]+/g, '').toLowerCase();
+}
+
+function safeMediaFileName(name, extension) {
+  const base = path.basename(String(name || 'media')).replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/\.+$/g, '') || 'media';
+  return base.toLowerCase().endsWith(extension) ? base : `${base}${extension}`;
+}
+
+async function prepareSingleMedia(session, item) {
+  const result = { ...item, files: [item] };
+  if (item.kind === 'image') {
+    const embeddedMotionPath = await extractAndroidMotionPhotoVideo(session, item);
+    if (embeddedMotionPath) return prepareEmbeddedMotionPhotoMedia(session, item, embeddedMotionPath);
+    result.previewPath = isBrowserImageExtension(item.extension) ? item.sourcePath : await createImagePreview(session, item.sourcePath, item.id);
+    result.thumbnailPath = await createImageThumbnail(session, result.previewPath || item.sourcePath, item.id);
+  } else {
+    result.previewPath = await createVideoPreview(session, item.sourcePath, item.id);
+    result.thumbnailPath = await createVideoThumbnail(session, item.sourcePath, item.id);
+  }
+  return result;
+}
+
+async function prepareEmbeddedMotionPhotoMedia(session, image, motionSourcePath) {
+  const previewPath = isBrowserImageExtension(image.extension) ? image.sourcePath : await createImagePreview(session, image.sourcePath, image.id);
+  return {
+    ...image,
+    kind: 'live',
+    previewPath,
+    thumbnailPath: await createImageThumbnail(session, previewPath || image.sourcePath, image.id),
+    motionSourcePath,
+    motionSourceName: path.basename(motionSourcePath),
+    motionPreviewPath: await createVideoPreview(session, motionSourcePath, image.id),
+    files: [image]
+  };
+}
+
+async function extractAndroidMotionPhotoVideo(session, image) {
+  if (!['.jpg', '.jpeg', '.heic', '.heif', '.avif'].includes(image.extension)) return '';
+  let data;
+  try {
+    data = await fs.readFile(image.sourcePath);
+  } catch {
+    return '';
+  }
+
+  const video = extractEmbeddedMotionPhotoVideo(data);
+  if (!video) return '';
+  const target = stagedDerivativePath(session, image.id, 'embedded-motion.mp4');
+  await fs.writeFile(target, video);
+  return target;
+}
+
+function extractEmbeddedMotionPhotoVideo(data) {
+  // Android Motion Photo stores an MP4 after the still image and describes it
+  // in XMP. The fallback scan remains gated by the MotionPhoto/MicroVideo flag
+  // so ordinary JPEG files are never mistaken for a video container.
+  const metadata = data.subarray(0, Math.min(data.length, 2 * 1024 * 1024)).toString('latin1');
+  if (!/(?:MotionPhoto|MicroVideo)\s*=\s*["']?1\b/i.test(metadata)) return null;
+  const lengths = Array.from(metadata.matchAll(/(?:Item:|GContainer:)?(?:Item)?Length\s*=\s*["'](\d+)["']/gi))
+    .map((match) => Number(match[1]))
+    .filter((length) => Number.isFinite(length) && length > 1024 && length < data.length);
+  const expectedLength = lengths.at(-1) || 0;
+  const expectedStart = expectedLength ? data.length - expectedLength : -1;
+  const hasExpectedMp4Header = expectedStart >= 0
+    && data.subarray(expectedStart + 4, expectedStart + 8).toString('ascii') === 'ftyp';
+  const scanFrom = expectedLength ? Math.max(0, expectedStart - 8192) : Math.max(0, data.length - 64 * 1024 * 1024);
+  // Item:Length is the authoritative boundary for Android Motion Photo. Searching for the
+  // last "ftyp" is unsafe: compressed MP4 payload bytes may coincidentally contain that text.
+  const ftypOffset = hasExpectedMp4Header
+    ? expectedStart + 4
+    : data.indexOf(Buffer.from('ftyp'), scanFrom);
+  if (ftypOffset < scanFrom || ftypOffset < 4) return null;
+  const videoStart = hasExpectedMp4Header ? expectedStart : ftypOffset - 4;
+  const video = data.subarray(videoStart);
+  if (video.subarray(4, 8).toString('ascii') !== 'ftyp' || video.length < 1024) return null;
+  return video;
+}
+
+async function prepareLivePhotoMedia(session, image, motion) {
+  const id = crypto.randomUUID();
+  const previewPath = isBrowserImageExtension(image.extension) ? image.sourcePath : await createImagePreview(session, image.sourcePath, id);
+  return {
+    id,
+    kind: 'live',
+    originalName: image.originalName,
+    extension: image.extension,
+    contentType: image.contentType,
+    sourcePath: image.sourcePath,
+    sourceName: image.sourceName,
+    motionSourcePath: motion.sourcePath,
+    motionSourceName: motion.sourceName,
+    previewPath,
+    motionPreviewPath: await createVideoPreview(session, motion.sourcePath, id),
+    thumbnailPath: await createImageThumbnail(session, previewPath || image.sourcePath, id),
+    size: image.size + motion.size,
+    uploadedAt: new Date().toISOString(),
+    files: [image, motion]
+  };
+}
+
+function isBrowserImageExtension(extension) {
+  return ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.avif'].includes(extension);
+}
+
+function stagedDerivativePath(session, id, suffix) {
+  return path.join(session.stagingDirectory, `${id}-${suffix}`);
+}
+
+async function createImagePreview(session, sourcePath, id) {
+  const target = stagedDerivativePath(session, id, 'preview.jpg');
+  return runFfmpeg(['-y', '-i', sourcePath, '-frames:v', '1', '-q:v', '2', target]).then(() => target).catch(() => '');
+}
+
+async function createImageThumbnail(session, sourcePath, id) {
+  const target = stagedDerivativePath(session, id, 'thumb.jpg');
+  return runFfmpeg(['-y', '-i', sourcePath, '-frames:v', '1', '-vf', 'scale=360:-2:force_original_aspect_ratio=decrease', '-q:v', '4', target]).then(() => target).catch(() => '');
+}
+
+async function createVideoPreview(session, sourcePath, id) {
+  const target = stagedDerivativePath(session, id, 'preview.mp4');
+  return transcodeVideoPreview(sourcePath, target).then(() => target).catch(() => '');
+}
+
+function transcodeVideoPreview(sourcePath, targetPath) {
+  return runFfmpeg(['-y', '-i', sourcePath, '-map', '0:v:0', '-map', '0:a?', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-movflags', '+faststart', targetPath]);
+}
+
+async function repairStoredLiveMedia(media) {
+  if (!media || media.kind !== 'live' || !media.sourcePath || !media.motionSourcePath) {
+    return { ok: true, repaired: false };
+  }
+  const mediaRoot = String(media.mediaRoot || '');
+  const sourcePath = await resolveStoredMediaPath(media.sourcePath, mediaRoot);
+  const motionPath = await resolveStoredMediaPath(media.motionSourcePath, mediaRoot);
+  const video = extractEmbeddedMotionPhotoVideo(await fs.readFile(sourcePath));
+  if (!video) return { ok: true, repaired: false };
+
+  const currentMotion = await fs.stat(motionPath);
+  if (currentMotion.size >= video.length) return { ok: true, repaired: false };
+
+  await fs.writeFile(motionPath, video);
+  let previewRebuilt = false;
+  if (media.motionPreviewPath) {
+    try {
+      const previewPath = await resolveStoredMediaPath(media.motionPreviewPath, mediaRoot);
+      await transcodeVideoPreview(motionPath, previewPath);
+      previewRebuilt = true;
+    } catch {
+      // Playback can still use the repaired original MP4 when a preview cannot be rebuilt.
+    }
+  }
+  return { ok: true, repaired: true, previewRebuilt };
+}
+
+async function createVideoThumbnail(session, sourcePath, id) {
+  const target = stagedDerivativePath(session, id, 'thumb.jpg');
+  return runFfmpeg(['-y', '-ss', '0.1', '-i', sourcePath, '-frames:v', '1', '-vf', 'scale=360:-2:force_original_aspect_ratio=decrease', '-q:v', '4', target]).then(() => target).catch(() => '');
+}
+
+function getFfmpegPath() {
+  if (!app.isPackaged) return ffmpegStaticPath;
+  return path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'ffmpeg-static', 'ffmpeg.exe');
+}
+
+function runFfmpeg(args) {
+  const executable = getFfmpegPath();
+  return new Promise((resolve, reject) => {
+    const processHandle = spawn(executable, ['-hide_banner', '-loglevel', 'error', ...args], { windowsHide: true });
+    let errors = '';
+    processHandle.stderr.on('data', (chunk) => { errors += chunk.toString(); });
+    processHandle.on('error', reject);
+    processHandle.on('close', (code) => code === 0 ? resolve() : reject(new Error(errors || '媒体转换失败。')));
+  });
+}
+
+function serializeStagedMedia(item) {
+  return {
+    id: item.id,
+    kind: item.kind,
+    originalName: item.originalName,
+    contentType: item.contentType,
+    size: item.size,
+    uploadedAt: item.uploadedAt,
+    previewUrl: item.previewPath ? pathToFileURL(item.previewPath).toString() : '',
+    thumbnailUrl: item.thumbnailPath ? pathToFileURL(item.thumbnailPath).toString() : '',
+    motionPreviewUrl: item.motionPreviewPath ? pathToFileURL(item.motionPreviewPath).toString() : ''
+  };
+}
+
+async function confirmMediaUpload(sessionId, date, entries) {
+  const session = mediaUploadSessions.get(String(sessionId || ''));
+  if (!session) throw new Error('上传会话已结束，请重新扫描二维码。');
+  if (!isValidMediaDate(date) || date !== session.date) throw new Error('上传日期与当前记录不一致，请重新开始上传。');
+  const selection = new Map((Array.isArray(entries) ? entries : []).map((entry) => [String(entry.id || ''), String(entry.annotation || '').trim().slice(0, 1000)]));
+  const selectedItems = session.items.filter((item) => selection.has(item.id));
+  if (selectedItems.length === 0) throw new Error('请至少保留一项已上传内容。');
+
+  const paths = await getStoragePaths(app);
+  const month = date.slice(0, 7);
+  const targetDirectory = path.join(paths.mediaDirectory, month, date);
+  await fs.mkdir(targetDirectory, { recursive: true });
+  const records = [];
+  for (const item of selectedItems) {
+    const base = `${Date.now()}-${item.id.slice(0, 8)}`;
+    const sourceRelativePath = await moveMediaFile(item.sourcePath, targetDirectory, `${base}${item.extension}`);
+    const previewRelativePath = item.previewPath && item.previewPath !== item.sourcePath
+      ? await moveMediaFile(item.previewPath, targetDirectory, `${base}-preview${path.extname(item.previewPath)}`)
+      : sourceRelativePath;
+    const thumbnailRelativePath = item.thumbnailPath
+      ? await moveMediaFile(item.thumbnailPath, targetDirectory, `${base}-thumb.jpg`)
+      : '';
+    const motionSourceRelativePath = item.motionSourcePath
+      ? await moveMediaFile(item.motionSourcePath, targetDirectory, `${base}-motion${path.extname(item.motionSourcePath)}`)
+      : '';
+    const motionPreviewRelativePath = item.motionPreviewPath
+      ? await moveMediaFile(item.motionPreviewPath, targetDirectory, `${base}-motion-preview.mp4`)
+      : '';
+    records.push({
+      id: item.id,
+      kind: item.kind,
+      originalName: item.originalName,
+      contentType: item.contentType,
+      size: item.size,
+      uploadedAt: item.uploadedAt,
+      annotation: selection.get(item.id) || '',
+      sourcePath: sourceRelativePath,
+      mediaRoot: paths.mediaDirectory,
+      previewPath: previewRelativePath,
+      thumbnailPath: thumbnailRelativePath,
+      motionSourcePath: motionSourceRelativePath,
+      motionPreviewPath: motionPreviewRelativePath
+    });
+  }
+  await closeMediaUploadSession(session.id, { removeStaging: true });
+  return { ok: true, media: records };
+}
+
+async function moveMediaFile(sourcePath, targetDirectory, targetName) {
+  if (!sourcePath) return '';
+  try {
+    await fs.access(sourcePath);
+  } catch {
+    return '';
+  }
+  const destination = path.join(targetDirectory, targetName);
+  await fs.rename(sourcePath, destination);
+  const paths = await getStoragePaths(app);
+  return path.relative(paths.mediaDirectory, destination).split(path.sep).join('/');
+}
+
+async function resolveStoredMediaPath(relativePath, mediaRoot = '') {
+  const normalized = String(relativePath || '').replace(/\\/g, '/');
+  if (!normalized || normalized.startsWith('../') || normalized.includes('/../')) throw new Error('无效的媒体路径。');
+  const paths = await getStoragePaths(app);
+  const isLegacyPath = normalized.startsWith('images/');
+  const storedRoot = mediaRoot && path.isAbsolute(mediaRoot) ? mediaRoot : '';
+  const root = path.resolve(storedRoot || (isLegacyPath ? path.join(paths.dataDirectory, 'images') : paths.mediaDirectory));
+  const relativeToRoot = isLegacyPath && storedRoot ? normalized.slice('images/'.length) : normalized;
+  const fullPath = path.resolve(root, relativeToRoot);
+  if (!fullPath.startsWith(`${root}${path.sep}`)) throw new Error('无效的媒体路径。');
+  await fs.access(fullPath);
+  return fullPath;
+}
+
+async function closeMediaUploadSession(sessionId, options = {}) {
+  const session = mediaUploadSessions.get(sessionId);
+  if (!session) return;
+  mediaUploadSessions.delete(sessionId);
+  clearTimeout(session.expiryTimer);
+  await closeServer(session.server);
+  if (options.removeStaging) {
+    await fs.rm(session.stagingDirectory, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+function closeServer(server) {
+  if (!server || !server.listening) return Promise.resolve();
+  return new Promise((resolve) => server.close(() => resolve()));
+}
+
+function sendMediaUploadEvent(channel, payload) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send(channel, payload);
+}
 ipcMain.handle('task:parseText', (event, payload = {}) => {
   if (!isMainWindowSender(event)) {
     return { ok: false, error: { code: 'TASK_PARSE_IPC_DENIED', message: '不允许的任务解析请求。' } };
@@ -637,9 +1392,25 @@ ipcMain.handle('data:choosePath', async (_event, data) => {
     return { canceled: true };
   }
 
+  const oldPaths = await getStoragePaths(app);
+  const targetDirectory = path.resolve(result.filePaths[0]);
+  if (path.resolve(oldPaths.dataDirectory) !== targetDirectory) {
+    const confirmation = await dialog.showMessageBox(mainWindow || undefined, {
+      type: 'warning',
+      title: '迁移本地数据',
+      message: '是否将现有本地数据迁移到新文件夹？',
+      detail: `迁移成功后会删除旧位置中的日织数据文件；其他文件不会被删除。\n\n旧位置：${oldPaths.dataDirectory}\n新位置：${targetDirectory}`,
+      buttons: ['迁移并清理旧位置', '取消'],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true
+    });
+    if (confirmation.response !== 0) return { canceled: true };
+  }
+
   return {
     canceled: false,
-    ...(await setStorageDirectory(app, result.filePaths[0], data))
+    ...(await setStorageDirectory(app, targetDirectory, data))
   };
 });
 
@@ -653,8 +1424,8 @@ ipcMain.handle('data:openDirectory', async () => {
   return { ok: !error, error };
 });
 
-ipcMain.handle('data:reset', async () => {
-  return resetData(app);
+ipcMain.handle('data:reset', async (_event, payload = {}) => {
+  return resetData(app, payload.data, payload.options);
 });
 
 ipcMain.handle('notify:show', (_event, payload = {}) => {

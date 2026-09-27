@@ -1,15 +1,22 @@
 const assert = require('assert/strict');
 const { parseTaskText, parseTaskTextList } = require('../src/parsers/taskTextParser');
-const { completeClockInput, rangeToComparableIntervals, rangesOverlap } = require('../src/shared/taskTimeUtils');
+const { completeClockInput, isAllDayRange, rangeToComparableIntervals, rangesOverlap } = require('../src/shared/taskTimeUtils');
 
 assert.equal(rangesOverlap(rangeToComparableIntervals('09:00', '10:00'), rangeToComparableIntervals('10:00', '11:00')), false, '相邻任务应允许前一任务结束时间等于后一任务开始时间。');
 assert.equal(rangesOverlap(rangeToComparableIntervals('09:00', '10:30'), rangeToComparableIntervals('10:00', '11:00')), true, '真正重叠的任务必须判定为冲突。');
+assert.equal(isAllDayRange('00:00', '00:00'), true, '零点到零点应表示全天任务。');
+assert.equal(rangesOverlap(rangeToComparableIntervals('00:00', '00:00'), rangeToComparableIntervals('09:00', '10:00')), true, '全天任务应与当天任何有时间的任务冲突。');
 assert.equal(completeClockInput(''), '00:00');
 assert.equal(completeClockInput('9'), '09:00');
 assert.equal(completeClockInput('09'), '09:00');
 assert.equal(completeClockInput('930'), '09:30');
 assert.equal(completeClockInput('0930'), '09:30');
 assert.equal(completeClockInput('2460'), '', '不存在的时间不能提交。');
+
+const allDayTask = parseTaskText('今天 00:00 到 00:00 和 Pipi 一起过节', { referenceDate: '2026-09-26' });
+assert.equal(allDayTask.startTime, '00:00');
+assert.equal(allDayTask.endTime, '00:00');
+assert.deepEqual(allDayTask.warnings, [], '零点到零点的全天安排不应被标记为跨日异常。');
 
 function expectParsed(text, referenceDate, expected) {
   const result = parseTaskText(text, { referenceDate });

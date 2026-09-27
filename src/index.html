@@ -57,6 +57,7 @@
               <strong id="systemTime">--</strong>
             </div>
             <button id="tutorialButton" class="secondary-button tutorial-button" type="button">使用<br />教程</button>
+            <button id="refreshStatusButton" class="secondary-button refresh-status-button" type="button" title="刷新软件状态" aria-label="刷新软件状态">🔄</button>
           </div>
         </header>
 
@@ -180,6 +181,7 @@
               <div class="journal-actions">
                 <span id="journalSaveState" class="muted">尚未保存</span>
                 <div class="journal-action-buttons">
+                  <button id="openMediaUploadButton" class="secondary-button" type="button">上传照片</button>
                   <button id="showJournalListButton" class="secondary-button" type="button">查看记录列表</button>
                   <button id="saveJournalButton" class="primary-button">保存记录</button>
                 </div>
@@ -242,7 +244,6 @@
 
               <section class="panel settings-data-panel hidden" data-settings-panel="data">
                 <h2>数据文件</h2>
-                <p class="muted">任务安排和每日记录会按月写入本地 JSON 文件，命名为 rizhi-data-YYYY-MM.json。你可以自己选择保存文件夹，方便归档、备份或迁移。</p>
 
                 <div class="path-list">
                   <div class="path-row">
@@ -266,6 +267,16 @@
                     </div>
                   </div>
                   <div class="path-row">
+                    <span>照片和视频归档文件夹</span>
+                    <div class="path-control">
+                      <code id="mediaDirectoryPath">加载中...</code>
+                      <div class="path-actions">
+                        <button id="chooseMediaDirectoryButton" class="secondary-button" type="button">更改</button>
+                        <button id="openMediaDirectoryButton" class="secondary-button" type="button">打开</button>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="path-row">
                     <span>模型下载地址</span>
                     <div class="path-control">
                       <code id="modelDownloadPath">加载中...</code>
@@ -279,19 +290,35 @@
 
               <section class="panel danger-panel hidden" data-settings-panel="danger">
                 <h2>数据删除</h2>
-                <p class="muted">可以删除某一天的全部安排和记录，也可以清空软件的全部本地数据。删除前都会二次确认。</p>
-                <label class="field compact-field">
-                  <span>删除日期</span>
+                <p class="muted">可选择单日或一段时期，按勾选内容删除任务、生活记录和附件；也可清空全部本地内容。删除前都会二次确认。</p>
+                <label class="confirm-row delete-range-toggle">
+                  <input id="deleteMultipleDates" type="checkbox" />
+                  <span>多日（删除日期范围）</span>
+                </label>
+                <div class="delete-date-fields">
+                  <label class="field compact-field">
+                  <span id="deleteStartDateLabel">删除日期</span>
                   <div class="date-stepper">
-                    <input id="deleteDayDate" type="date" />
+                    <input id="deleteStartDate" type="date" />
                     <div class="date-stepper-buttons" aria-hidden="false">
-                      <button class="date-step-button date-step-up" type="button" data-date-step-for="deleteDayDate" data-date-step="-1" aria-label="前一天"></button>
-                      <button class="date-step-button date-step-down" type="button" data-date-step-for="deleteDayDate" data-date-step="1" aria-label="后一天"></button>
+                      <button class="date-step-button date-step-up" type="button" data-date-step-for="deleteStartDate" data-date-step="-1" aria-label="前一天"></button>
+                      <button class="date-step-button date-step-down" type="button" data-date-step-for="deleteStartDate" data-date-step="1" aria-label="后一天"></button>
                     </div>
                   </div>
                 </label>
+                  <label id="deleteEndDateField" class="field compact-field hidden">
+                    <span>结束日期</span>
+                    <div class="date-stepper">
+                      <input id="deleteEndDate" type="date" />
+                      <div class="date-stepper-buttons" aria-hidden="false">
+                        <button class="date-step-button date-step-up" type="button" data-date-step-for="deleteEndDate" data-date-step="-1" aria-label="前一天"></button>
+                        <button class="date-step-button date-step-down" type="button" data-date-step-for="deleteEndDate" data-date-step="1" aria-label="后一天"></button>
+                      </div>
+                    </div>
+                  </label>
+                </div>
                 <div class="delete-actions">
-                  <button id="openDeleteDayButton" class="danger-button" type="button">删除当天数据</button>
+                  <button id="openDeletePeriodButton" class="danger-button" type="button">删除选定日期数据</button>
                   <button id="openResetButton" class="danger-button" type="button">重置全部数据</button>
                 </div>
               </section>
@@ -342,7 +369,6 @@
 
               <section class="panel settings-asr-test-panel hidden" data-settings-panel="asr-test">
                 <h2>本地语音识别测试</h2>
-                <p class="muted">识别时只使用本机麦克风、已安装的 Qwen3-ASR 模型和本地 WebAssembly，不会写入任务或每日记录，也不会联网。首次安装模型时才会连接官方下载源。</p>
                 <section class="asr-model-status" aria-labelledby="asrModelStatusTitle">
                   <div>
                     <h3 id="asrModelStatusTitle">离线语音模型</h3>
@@ -412,7 +438,7 @@
     <div id="versionBadge" class="version-badge">版本 --</div>
 
     <div id="resetModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="resetTitle">
-      <div class="modal-card">
+      <div class="modal-card reset-modal-card">
         <div class="modal-header">
           <div>
             <p class="eyebrow">二次确认</p>
@@ -421,15 +447,18 @@
           <button id="closeResetModalButton" class="icon-button" aria-label="关闭">×</button>
         </div>
 
-        <p id="resetDescription" class="muted">确认后会删除以下内容：</p>
-        <div id="resetPathList" class="reset-path-list"></div>
+        <div class="reset-modal-content">
+          <p id="resetDescription" class="muted">请选择需要删除的内容：</p>
+          <div id="resetDeleteOptions" class="reset-delete-options" aria-label="选择删除内容"></div>
+          <div id="resetPathList" class="reset-path-list"></div>
 
-        <label class="confirm-row">
-          <input id="resetConfirmCheck" type="checkbox" />
-          <span id="resetConfirmText">我确认删除这些日织数据</span>
-        </label>
+          <label class="confirm-row">
+            <input id="resetConfirmCheck" type="checkbox" />
+            <span id="resetConfirmText">我确认删除这些日织数据</span>
+          </label>
+        </div>
 
-        <div class="modal-actions hidden" aria-hidden="true">
+        <div class="modal-actions reset-modal-actions">
           <button id="cancelResetButton" class="secondary-button" type="button">取消</button>
           <button id="confirmResetButton" class="danger-button" type="button" disabled>确认重置</button>
         </div>
@@ -494,10 +523,36 @@
             <h3>每日安排</h3>
             <p class="muted">适合某一天或一段日期内的工作、学习、生活规划。</p>
             <div class="import-choice-actions">
-              <button id="reusePreviousButton" class="secondary-button" type="button">复用前一天</button>
+              <button id="reusePreviousButton" class="secondary-button" type="button">复用特定日期</button>
               <button id="manualDailyPlanButton" class="primary-button" type="button">填写安排内容</button>
             </div>
           </section>
+        </div>
+      </div>
+    </div>
+
+    <div id="reuseDateModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="reuseDateTitle">
+      <div class="modal-card small-modal">
+        <div class="modal-header">
+          <div>
+            <p class="eyebrow">复用任务安排</p>
+            <h2 id="reuseDateTitle">选择要复用的日期</h2>
+          </div>
+          <button id="closeReuseDateModalButton" class="icon-button" aria-label="关闭">×</button>
+        </div>
+
+        <div class="manual-form">
+          <p id="reuseDateDescription" class="muted">将选定日期的任务安排复制到当前日期。</p>
+          <label class="field">
+            <span>来源日期</span>
+            <div class="date-stepper">
+              <input id="reuseSourceDate" type="date" />
+            </div>
+          </label>
+          <div class="modal-actions">
+            <button id="cancelReuseDateButton" class="secondary-button" type="button">取消</button>
+            <button id="confirmReuseDateButton" class="primary-button" type="button">确认复用</button>
+          </div>
         </div>
       </div>
     </div>
@@ -672,6 +727,50 @@
         <div class="modal-actions">
           <button id="closeJournalViewButton" class="primary-button" type="button">关闭</button>
         </div>
+      </div>
+    </div>
+
+    <div id="mediaUploadModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="mediaUploadTitle">
+      <div class="modal-card wide-modal media-upload-modal-card">
+        <div class="modal-header">
+          <div>
+            <p class="eyebrow">手机上传</p>
+            <h2 id="mediaUploadTitle">扫描二维码上传</h2>
+          </div>
+          <button id="closeMediaUploadModalButton" class="icon-button" aria-label="关闭">×</button>
+        </div>
+        <div class="media-upload-layout">
+          <div class="media-qr-panel">
+            <img id="mediaUploadQr" class="media-upload-qr" alt="手机上传二维码" />
+            <p id="mediaUploadHint" class="muted">请用与电脑连接同一 Wi‑Fi 的手机扫描二维码。</p>
+            <details class="media-network-debug" open>
+              <summary>上传连接状态</summary>
+              <pre id="mediaNetworkDebug">正在检测…</pre>
+            </details>
+          </div>
+          <div class="media-upload-receipt">
+            <h3>已接收的内容</h3>
+            <p id="mediaUploadStatus" class="muted">等待手机上传…</p>
+            <div id="mediaUploadPreviewList" class="media-upload-preview-list"></div>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button id="cancelMediaUploadButton" class="secondary-button" type="button">取消</button>
+          <button id="confirmMediaUploadButton" class="primary-button" type="button" disabled>确认并保存</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="mediaViewModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="mediaViewTitle">
+      <div class="modal-card wide-modal media-view-modal-card">
+        <div class="modal-header">
+          <div>
+            <p class="eyebrow">记录附件</p>
+            <h2 id="mediaViewTitle">查看内容</h2>
+          </div>
+          <button id="closeMediaViewModalButton" class="icon-button" aria-label="关闭">×</button>
+        </div>
+        <div id="mediaViewContent" class="media-view-content"></div>
       </div>
     </div>
 

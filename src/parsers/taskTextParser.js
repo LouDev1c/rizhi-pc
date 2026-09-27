@@ -212,12 +212,15 @@ function parseSegmentContent(text, spans) {
 function alignRangeToSequence(range, previousEndMinutes) {
   let startMinutes = toMinutes(range.startTime);
   let endMinutes = toMinutes(range.endTime);
+  const isAllDay = startMinutes === 0 && endMinutes === 0;
   let crossedDay = false;
   if (range.isAmbiguous && Number.isFinite(previousEndMinutes) && startMinutes < previousEndMinutes && startMinutes < 720) {
     startMinutes += 720;
     endMinutes += 720;
   }
-  if (endMinutes <= startMinutes) {
+  if (isAllDay) {
+    endMinutes += 1440;
+  } else if (endMinutes <= startMinutes) {
     if (range.isAmbiguous && endMinutes < 720) {
       endMinutes += 720;
     } else {

@@ -63,10 +63,16 @@
     return hours * 60 + minutes;
   }
 
+  function isAllDayRange(startTime, endTime) {
+    return timeToMinutes(startTime) === 0 && timeToMinutes(endTime) === 0;
+  }
+
   function rangeToComparableIntervals(startTime, endTime) {
     const start = timeToMinutes(startTime);
     const end = timeToMinutes(endTime);
-    if (start === null || end === null || start === end) return [];
+    if (start === null || end === null) return [];
+    if (isAllDayRange(startTime, endTime)) return [[0, 24 * 60]];
+    if (start === end) return [];
     if (end > start) return [[start, end], [start + 1440, end + 1440]];
     return [[start, end + 1440], [start - 1440, end]];
   }
@@ -92,6 +98,7 @@
     formatTimeRangeInput,
     inputRangeToComparableIntervals,
     isValidClockPart,
+    isAllDayRange,
     normalizeTime,
     rangesOverlap,
     rangeToComparableIntervals,
