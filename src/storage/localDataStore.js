@@ -37,6 +37,10 @@ function getLegacyDefaultSettingsPath(app) {
 }
 
 function getSettingsLocationPath(app) {
+  return path.join(app.getPath('userData'), SETTINGS_LOCATION_FILE_NAME);
+}
+
+function getPreviousSettingsLocationPath(app) {
   return path.join(getDefaultMemoryDir(app), SETTINGS_LOCATION_FILE_NAME);
 }
 
@@ -93,23 +97,21 @@ async function getActiveSettingsPath(app) {
 }
 
 async function getActiveSettingsPathWithoutMigration(app) {
-  const locationPath = getSettingsLocationPath(app);
-
-  try {
-    const text = await fs.readFile(locationPath, 'utf8');
-    const location = JSON.parse(text);
-    return location.settingsFilePath || getDefaultSettingsPath(app);
-  } catch (error) {
+  const locationPaths = [
+    getSettingsLocationPath(app),
+    getPreviousSettingsLocationPath(app),
+    getLegacySettingsLocationPath(app)
+  ];
+  for (const locationPath of locationPaths) {
     try {
-      const text = await fs.readFile(getLegacySettingsLocationPath(app), 'utf8');
+      const text = await fs.readFile(locationPath, 'utf8');
       const location = JSON.parse(text);
-      return location.settingsFilePath || getLegacyDefaultSettingsPath(app);
-    } catch (legacyError) {
-      if (await fileExists(getDefaultSettingsPath(app))) return getDefaultSettingsPath(app);
-      if (await fileExists(getLegacyDefaultSettingsPath(app))) return getLegacyDefaultSettingsPath(app);
-      return getDefaultSettingsPath(app);
-    }
+      if (location.settingsFilePath) return location.settingsFilePath;
+    } catch (error) {}
   }
+  if (await fileExists(getDefaultSettingsPath(app))) return getDefaultSettingsPath(app);
+  if (await fileExists(getLegacyDefaultSettingsPath(app))) return getLegacyDefaultSettingsPath(app);
+  return getDefaultSettingsPath(app);
 }
 
 async function readSettings(app) {
@@ -275,6 +277,109 @@ async function setMediaDirectory(app, mediaDirectory, currentData) {
   }
 }
 
+async function setStorageRoot(app, storageRoot, currentData) {
+  await migrateStorageNames(app);
+  const oldPaths = await getStoragePaths(app);
+  const targetRoot = path.resolve(storageRoot);
+  if (samePath(oldPaths.dataDirectory, targetRoot)) {
+    const result = await loadData(app);
+    return {
+      ...result,
+      migration: { from: oldPaths.dataDirectory, to: targetRoot, skipped: true, deleted: [], cleanupWarnings: [] }
+    };
+  }
+
+  assertNonNestedMigrationPaths(oldPaths.dataDirectory, targetRoot);
+  let dataMigration = null;
+  try {
+    dataMigration = await setStorageDirectory(app, targetRoot, currentData);
+    const targetMediaDirectory = path.join(targetRoot, 'images');
+    const mediaMigration = samePath(dataMigration.paths.mediaDirectory, targetMediaDirectory)
+      ? dataMigration
+      : await setMediaDirectory(app, targetMediaDirectory, dataMigration.data);
+    const remainingMigration = await moveRemainingDirectoryContents(oldPaths.dataDirectory, targetRoot);
+    const migrations = [dataMigration.migration, mediaMigration === dataMigration ? null : mediaMigration.migration]
+      .filter(Boolean);
+
+    return {
+      ...mediaMigration,
+      paths: { ...mediaMigration.paths, storageRoot: targetRoot },
+      migration: {
+        from: oldPaths.dataDirectory,
+        to: targetRoot,
+        deleted: [...new Set(migrations.flatMap((item) => item.deleted || []).concat(remainingMigration.deleted))],
+        cleanupWarnings: migrations.flatMap((item) => item.cleanupWarnings || []).concat(remainingMigration.cleanupWarnings)
+      }
+    };
+  } catch (error) {
+    if (dataMigration) {
+      try {
+        await setStorageDirectory(app, oldPaths.dataDirectory, dataMigration.data);
+      } catch (rollbackError) {
+        error.message = `${error.message}；数据回退失败：${rollbackError.message}`;
+      }
+    }
+    throw error;
+  }
+}
+
+async function moveRemainingDirectoryContents(sourceRoot, targetRoot) {
+  const deleted = [];
+  const cleanupWarnings = [];
+  if (samePath(sourceRoot, targetRoot) || !(await fileExists(sourceRoot))) return { deleted, cleanupWarnings };
+
+  const entries = await fs.readdir(sourceRoot, { withFileTypes: true });
+  await fs.mkdir(targetRoot, { recursive: true });
+  for (const entry of entries) {
+    const source = path.join(sourceRoot, entry.name);
+    const target = path.join(targetRoot, entry.name);
+    try {
+      await moveEntryPreservingStructure(source, target);
+      deleted.push(source);
+    } catch (error) {
+      cleanupWarnings.push(`${source}：${error.message || String(error)}`);
+    }
+  }
+  await attemptCleanup(() => removeDirectoryIfEmpty(sourceRoot, deleted), cleanupWarnings);
+  return { deleted, cleanupWarnings };
+}
+
+async function moveEntryPreservingStructure(source, target) {
+  const sourceStat = await fs.lstat(source);
+  if (sourceStat.isSymbolicLink()) throw new Error('不迁移符号链接');
+  const targetStat = await statIfExists(target);
+
+  if (sourceStat.isDirectory()) {
+    if (targetStat && !targetStat.isDirectory()) throw new Error('目标位置存在同名文件');
+    await fs.mkdir(target, { recursive: true });
+    for (const entry of await fs.readdir(source, { withFileTypes: true })) {
+      await moveEntryPreservingStructure(path.join(source, entry.name), path.join(target, entry.name));
+    }
+    await fs.rmdir(source);
+    return;
+  }
+
+  if (!sourceStat.isFile()) throw new Error('不迁移特殊文件');
+  if (targetStat) throw new Error('目标位置存在同名内容');
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  try {
+    await fs.rename(source, target);
+  } catch (error) {
+    if (error.code !== 'EXDEV') throw error;
+    await fs.copyFile(source, target, fsSync.constants.COPYFILE_EXCL);
+    await fs.unlink(source);
+  }
+}
+
+async function statIfExists(targetPath) {
+  try {
+    return await fs.lstat(targetPath);
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
 function rewriteMediaRoots(data, oldRoot, newRoot) {
   const normalized = normalizeData(data);
   return {
@@ -315,7 +420,7 @@ function assertNonNestedMigrationPaths(sourceRoot, targetRoot) {
   const sourceInsideTarget = path.relative(target, source);
   if ((targetInsideSource && !targetInsideSource.startsWith('..') && !path.isAbsolute(targetInsideSource))
     || (sourceInsideTarget && !sourceInsideTarget.startsWith('..') && !path.isAbsolute(sourceInsideTarget))) {
-    throw new Error('新旧媒体文件夹不能互相包含，请选择独立的文件夹。');
+    throw new Error('新旧存放文件夹不能互相包含，请选择独立的文件夹。');
   }
 }
 
@@ -420,6 +525,7 @@ async function getStoragePaths(app) {
 function buildPaths(app, dataDirectory, settingsFilePath, monthlyFiles = [], mediaDirectory = path.join(dataDirectory, 'images')) {
   const currentMonth = monthKeyFromDate(new Date());
   return {
+    storageRoot: dataDirectory,
     dataDirectory,
     mediaDirectory,
     dataFilePath: getMonthlyDataPath(dataDirectory, currentMonth),
@@ -463,6 +569,7 @@ async function migrateStorageNamesOnce(app) {
   const legacyInstallMemoryDir = getLegacyInstallMemoryDir(app);
   const oldDefaultSettingsPath = getLegacyDefaultSettingsPath(app);
   const newDefaultSettingsPath = getDefaultSettingsPath(app);
+  const previousLocationPath = getPreviousSettingsLocationPath(app);
   const oldLocationPath = getLegacySettingsLocationPath(app);
   const newLocationPath = getSettingsLocationPath(app);
 
@@ -508,6 +615,7 @@ async function migrateStorageNamesOnce(app) {
 
   await fs.mkdir(defaultMemoryDir, { recursive: true });
   await writeJsonFileIfChanged(newLocationPath, { settingsFilePath: activeSettingsPath });
+  if (!samePath(previousLocationPath, newLocationPath)) await removeFileIfExists(previousLocationPath, []);
   await removeFileIfExists(oldLocationPath, []);
   await renameLegacyMonthlyDataFiles(dataDirectory);
 }
@@ -825,6 +933,5 @@ module.exports = {
   loadData,
   resetData,
   saveData,
-  setStorageDirectory,
-  setMediaDirectory
+  setStorageRoot
 };

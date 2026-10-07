@@ -103,7 +103,7 @@ function getDevelopmentModelDirectory(app, developmentModelDirectory) {
   ).trim();
 
   // A developer override is deliberately ignored by packaged builds. Installed
-  // applications always use the userData location above.
+  // applications use the persisted installation location (userData by default).
   if (!configuredDirectory || (app && app.isPackaged)) return '';
   return path.resolve(configuredDirectory);
 }
@@ -120,8 +120,8 @@ function resolveModelDirectory(app, options = {}) {
   }
 
   return {
-    directory: getUserDataModelDirectory(app, modelConfig),
-    source: 'userData'
+    directory: options.modelDirectory || getUserDataModelDirectory(app, modelConfig),
+    source: options.modelDirectory ? 'custom' : 'userData'
   };
 }
 

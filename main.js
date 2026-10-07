@@ -9,7 +9,7 @@ const fsSync = require('fs');
 const fs = require('fs/promises');
 const { parseScheduleFile } = require('./src/parsers/scheduleParser');
 const { parseTaskTextList } = require('./src/parsers/taskTextParser');
-const { getStoragePaths, loadData, resetData, saveData, setStorageDirectory, setMediaDirectory } = require('./src/storage/localDataStore');
+const { getStoragePaths, loadData, resetData, saveData, setStorageRoot } = require('./src/storage/localDataStore');
 const { autoUpdater } = require('electron-updater');
 const { createAsrModelManager } = require('./src/asr/modelManager');
 const { createAsrService } = require('./src/asr/asrService');
@@ -29,6 +29,7 @@ let isQuitting = false;
 let isClosePromptShowing = false;
 let isUpdatePromptShowing = false;
 let asrService = null;
+let asrPathChangeInProgress = false;
 const mediaUploadSessions = new Map();
 const MEDIA_UPLOAD_MAX_BYTES = 350 * 1024 * 1024;
 const MEDIA_IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.avif', '.tif', '.tiff', '.heic', '.heif']);
@@ -481,12 +482,15 @@ function serializeAsrError(error) {
   };
 }
 
-function createAsrIpcResponse(action) {
+function createAsrIpcResponse(action, { allowPathChange = false } = {}) {
   return async (event) => {
     if (!isMainWindowSender(event)) {
       return { ok: false, error: { code: 'ASR_IPC_DENIED', message: '不允许的 ASR IPC 请求。' } };
     }
     try {
+      if (asrPathChangeInProgress && !allowPathChange) {
+        return { ok: false, error: { code: 'ASR_MODEL_BUSY', message: '模型路径正在更改，请稍后使用。' } };
+      }
       const result = await action(getAsrService());
       return { ok: true, ...result };
     } catch (error) {
@@ -587,31 +591,6 @@ ipcMain.handle('media:repairLive', async (event, media = {}) => {
   } catch (error) {
     return mediaError('MEDIA_REPAIR_ERROR', error.message || '无法修复实况照片。');
   }
-});
-
-ipcMain.handle('media:chooseDirectory', async (event, data) => {
-  if (!isMainWindowSender(event)) return mediaError('MEDIA_IPC_DENIED', '不允许更改媒体文件夹。');
-  const result = await dialog.showOpenDialog({
-    title: '选择照片和视频归档文件夹',
-    properties: ['openDirectory', 'createDirectory']
-  });
-  if (result.canceled || result.filePaths.length === 0) return { ok: true, canceled: true };
-  const oldPaths = await getStoragePaths(app);
-  const targetDirectory = path.resolve(result.filePaths[0]);
-  if (path.resolve(oldPaths.mediaDirectory) !== targetDirectory) {
-    const confirmation = await dialog.showMessageBox(mainWindow || undefined, {
-      type: 'warning',
-      title: '迁移照片和视频',
-      message: '是否将已有照片和视频迁移到新文件夹？',
-      detail: `迁移成功后会删除旧归档文件夹中的日织媒体内容。\n\n旧位置：${oldPaths.mediaDirectory}\n新位置：${targetDirectory}`,
-      buttons: ['迁移并清理旧位置', '取消'],
-      defaultId: 0,
-      cancelId: 1,
-      noLink: true
-    });
-    if (confirmation.response !== 0) return { ok: true, canceled: true };
-  }
-  return { ok: true, canceled: false, ...(await setMediaDirectory(app, targetDirectory, data)) };
 });
 
 ipcMain.handle('media:openDirectory', async (event) => {
@@ -1276,7 +1255,7 @@ ipcMain.handle('asr:initialize', createAsrIpcResponse(async (service) => {
 
 ipcMain.handle('asr:modelStatus', createAsrIpcResponse(async (service) => (
   service.modelManager.getStatus()
-)));
+), { allowPathChange: true }));
 
 ipcMain.handle('asr:downloadModel', createAsrIpcResponse(async (service) => {
   const status = await service.modelManager.download((progress) => {
@@ -1382,37 +1361,100 @@ ipcMain.handle('data:getPaths', async () => {
   return getStoragePaths(app);
 });
 
-ipcMain.handle('data:choosePath', async (_event, data) => {
-  const result = await dialog.showOpenDialog({
-    title: '选择日织本地记录保存文件夹',
-    properties: ['openDirectory', 'createDirectory']
-  });
+ipcMain.handle('storage:chooseRoot', async (event, data) => {
+  if (!isMainWindowSender(event)) throw new Error('不允许更改本地内容存放位置。');
+  if (mediaUploadSessions.size > 0) throw new Error('请先结束正在进行的媒体上传，再更改存放位置。');
 
-  if (result.canceled || result.filePaths.length === 0) {
-    return { canceled: true };
+  const service = getAsrService();
+  const manager = service.modelManager;
+  if (manager.downloadPromise || service.initializePromise || service.pendingRequests.size
+      || !['idle', 'ready', 'model-missing', 'error'].includes(service.state)) {
+    throw new Error('请等待模型下载、录音或识别结束后，再更改存放位置。');
+  }
+  if (manager.getDirectoryInfo().source === 'development') {
+    throw new Error('当前使用开发模型路径，请先取消 RIZHI_ASR_MODEL_DIR 配置并重启软件。');
   }
 
   const oldPaths = await getStoragePaths(app);
-  const targetDirectory = path.resolve(result.filePaths[0]);
-  if (path.resolve(oldPaths.dataDirectory) !== targetDirectory) {
-    const confirmation = await dialog.showMessageBox(mainWindow || undefined, {
-      type: 'warning',
-      title: '迁移本地数据',
-      message: '是否将现有本地数据迁移到新文件夹？',
-      detail: `迁移成功后会删除旧位置中的日织数据文件；其他文件不会被删除。\n\n旧位置：${oldPaths.dataDirectory}\n新位置：${targetDirectory}`,
-      buttons: ['迁移并清理旧位置', '取消'],
-      defaultId: 0,
-      cancelId: 1,
-      noLink: true
-    });
-    if (confirmation.response !== 0) return { canceled: true };
-  }
+  const oldRoot = path.resolve(oldPaths.storageRoot || oldPaths.dataDirectory);
+  const selection = await dialog.showOpenDialog(mainWindow, {
+    title: '选择新的日织内容存放文件夹',
+    defaultPath: oldRoot,
+    properties: ['openDirectory', 'createDirectory']
+  });
+  if (selection.canceled || !selection.filePaths.length) return { canceled: true };
 
-  return {
-    canceled: false,
-    ...(await setStorageDirectory(app, targetDirectory, data))
-  };
+  const targetRoot = path.resolve(selection.filePaths[0]);
+  if (sameResolvedPath(oldRoot, targetRoot)) return { canceled: true };
+  if (targetRoot === path.parse(targetRoot).root) throw new Error('不能将磁盘根目录直接设为日织内容存放位置。');
+  if (pathsOverlap(oldRoot, targetRoot) || pathsOverlap(manager.getDownloadDirectory(), targetRoot)) {
+    throw new Error('新旧存放位置不能互相包含，请选择独立的空文件夹。');
+  }
+  await fs.mkdir(targetRoot, { recursive: true });
+  if ((await fs.readdir(targetRoot)).length > 0) throw new Error('新存放位置必须是空文件夹。');
+
+  const targetModelParent = path.join(targetRoot, 'models', 'asr');
+  const targetModelDirectory = path.join(targetModelParent, manager.modelConfig.modelId);
+  const confirmation = await dialog.showMessageBox(mainWindow, {
+    type: 'warning',
+    title: '迁移日织本地内容',
+    message: '是否将全部日织本地内容迁移到新文件夹？',
+    detail: `旧根目录：${oldRoot}\n新根目录：${targetRoot}\n\n数据、设置、照片视频和语音模型会保持原有结构迁移；成功后会清理旧位置。迁移期间请勿关闭软件。`,
+    buttons: ['迁移并清理旧位置', '取消'],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true
+  });
+  if (confirmation.response !== 0) return { canceled: true };
+
+  const oldModelDirectory = manager.getDownloadDirectory();
+  asrPathChangeInProgress = true;
+  let modelResult = null;
+  try {
+    await service.dispose();
+    modelResult = await manager.changeDirectory(targetModelParent);
+    const storageResult = await setStorageRoot(app, targetRoot, data);
+    const cleanupWarnings = [...(storageResult.migration.cleanupWarnings || [])];
+    if (modelResult.cleanupWarning) cleanupWarnings.push(modelResult.cleanupWarning);
+    sendAsrEvent('asr:model-status', modelResult.modelStatus);
+    return {
+      canceled: false,
+      ...storageResult,
+      paths: { ...storageResult.paths, storageRoot: targetRoot },
+      modelStatus: modelResult.modelStatus,
+      modelDirectory: targetModelDirectory,
+      migration: { ...storageResult.migration, cleanupWarnings }
+    };
+  } catch (error) {
+    if (modelResult) {
+      try {
+        await manager.changeDirectory(path.dirname(oldModelDirectory));
+      } catch (rollbackError) {
+        error.message = `${error.message}；模型回退失败：${rollbackError.message}`;
+      }
+    }
+    throw error;
+  } finally {
+    if (service.isDisposed) asrService = null;
+    asrPathChangeInProgress = false;
+  }
 });
+
+function sameResolvedPath(first, second) {
+  const normalizeForComparison = (value) => {
+    const resolved = path.normalize(path.resolve(value || ''));
+    return process.platform === 'win32' ? resolved.toLocaleLowerCase() : resolved;
+  };
+  return normalizeForComparison(first) === normalizeForComparison(second);
+}
+
+function pathsOverlap(first, second) {
+  const contains = (parent, child) => {
+    const relative = path.relative(path.resolve(parent), path.resolve(child));
+    return !relative || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
+  };
+  return contains(first, second) || contains(second, first);
+}
 
 ipcMain.handle('data:openDirectory', async () => {
   const paths = await getStoragePaths(app);

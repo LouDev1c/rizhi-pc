@@ -50,13 +50,21 @@ const statusBox = document.querySelector('#statusBox');
 const manualTaskButton = document.querySelector('#manualTaskButton');
 const importFileButton = document.querySelector('#importFileButton');
 const backToCurrentTaskButton = document.querySelector('#backToCurrentTaskButton');
-const reusePreviousButton = document.querySelector('#reusePreviousButton');
-const reuseDateModal = document.querySelector('#reuseDateModal');
-const closeReuseDateModalButton = document.querySelector('#closeReuseDateModalButton');
-const cancelReuseDateButton = document.querySelector('#cancelReuseDateButton');
-const confirmReuseDateButton = document.querySelector('#confirmReuseDateButton');
-const reuseSourceDate = document.querySelector('#reuseSourceDate');
-const reuseDateDescription = document.querySelector('#reuseDateDescription');
+const saveTaskTemplateButton = document.querySelector('#saveTaskTemplateButton');
+const saveTaskTemplateModal = document.querySelector('#saveTaskTemplateModal');
+const closeSaveTaskTemplateModalButton = document.querySelector('#closeSaveTaskTemplateModalButton');
+const cancelSaveTaskTemplateButton = document.querySelector('#cancelSaveTaskTemplateButton');
+const saveTaskTemplateForm = document.querySelector('#saveTaskTemplateForm');
+const taskTemplateName = document.querySelector('#taskTemplateName');
+const taskTemplateSaveSummary = document.querySelector('#taskTemplateSaveSummary');
+const taskTemplateSaveError = document.querySelector('#taskTemplateSaveError');
+const reuseTemplateButton = document.querySelector('#reuseTemplateButton');
+const reuseTemplateModal = document.querySelector('#reuseTemplateModal');
+const closeReuseTemplateModalButton = document.querySelector('#closeReuseTemplateModalButton');
+const cancelReuseTemplateButton = document.querySelector('#cancelReuseTemplateButton');
+const confirmReuseTemplateButton = document.querySelector('#confirmReuseTemplateButton');
+const taskTemplateList = document.querySelector('#taskTemplateList');
+const taskTemplateEmpty = document.querySelector('#taskTemplateEmpty');
 const importMoreButton = document.querySelector('#importMoreButton');
 const taskDateFilter = document.querySelector('#taskDateFilter');
 const journalDate = document.querySelector('#journalDate');
@@ -85,15 +93,14 @@ const journalEditorPanel = document.querySelector('#journalEditorPanel');
 const recordsListPanel = document.querySelector('#recordsListPanel');
 const showJournalListButton = document.querySelector('#showJournalListButton');
 const backToJournalEditorButton = document.querySelector('#backToJournalEditorButton');
+const storageRootPath = document.querySelector('#storageRootPath');
 const dataFilePath = document.querySelector('#dataFilePath');
 const settingsFilePath = document.querySelector('#settingsFilePath');
 const mediaDirectoryPath = document.querySelector('#mediaDirectoryPath');
 const modelDownloadPath = document.querySelector('#modelDownloadPath');
-const chooseDataPathButton = document.querySelector('#chooseDataPathButton');
+const changeStorageRootButton = document.querySelector('#changeStorageRootButton');
 const openDataPathButton = document.querySelector('#openDataPathButton');
-const chooseMediaDirectoryButton = document.querySelector('#chooseMediaDirectoryButton');
 const openMediaDirectoryButton = document.querySelector('#openMediaDirectoryButton');
-const changeSettingsPathButton = document.querySelector('#changeSettingsPathButton');
 const openSettingsPathButton = document.querySelector('#openSettingsPathButton');
 const openModelDirectoryButton = document.querySelector('#openModelDirectoryButton');
 const settingsMenuButtons = document.querySelectorAll('.settings-menu-item');
@@ -233,6 +240,7 @@ let tasks = [];
 let journals = [];
 let profile = {};
 let storagePaths = {
+  storageRoot: '',
   dataFilePath: '',
   settingsFilePath: '',
   legacyStorageKeys: ['whbr.tasks', 'whbr.journals']
@@ -241,6 +249,8 @@ let asrModelDownloadDirectory = '';
 let editingTaskId = '';
 let draggedTaskId = '';
 let deleteMode = 'all';
+let selectedTaskTemplateId = '';
+let expandedTaskTemplateId = '';
 let activeMediaAnnotationEditor = null;
 let highlightedTaskId = '';
 let currentEffectiveNow = new Date();
@@ -320,7 +330,7 @@ const tutorialSteps = [
     page: 'tasks',
     targetSelector: '#importMoreButton',
     title: '批量创建任务',
-    text: '点击这个按钮，可手动填写或导入文件生成课表，也可以选择特定日期复用任务安排。'
+    text: '点击这个按钮，可手动填写或导入文件生成课表，也可以复用已经保存的安排模板。'
   },
   {
     page: 'records',
@@ -355,7 +365,7 @@ const tutorialSteps = [
     settingPanel: 'data',
     targetSelector: '.settings-data-panel',
     title: '数据文件',
-    text: '个人记录与软件设置会存放在这里显示的文件夹中。可以选择新的保存文件夹，也可以直接打开本地文件夹做备份或迁移。'
+    text: '这里显示日织内容的统一存放位置和各类文件地址。更改存放位置时，数据、设置、媒体和语音模型会一起迁移。'
   },
   {
     page: 'settings',
@@ -454,7 +464,8 @@ backToCurrentTaskButton.addEventListener('click', async () => {
   if (await confirmLeaveRecordsPageIfNeeded('tasks')) goToCurrentTask();
 });
 if (manualTaskButton) manualTaskButton.addEventListener('click', openImportChoiceModal);
-if (reusePreviousButton) reusePreviousButton.addEventListener('click', openReuseDateModal);
+if (saveTaskTemplateButton) saveTaskTemplateButton.addEventListener('click', openSaveTaskTemplateModal);
+if (reuseTemplateButton) reuseTemplateButton.addEventListener('click', openReuseTemplateModal);
 if (importFileButton) importFileButton.addEventListener('click', openImportChoiceModal);
 importMoreButton.addEventListener('click', openImportChoiceModal);
 window.addEventListener('keydown', (event) => {
@@ -473,8 +484,11 @@ window.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && !importChoiceModal.classList.contains('hidden')) {
     closeImportChoiceModal();
   }
-  if (event.key === 'Escape' && reuseDateModal && !reuseDateModal.classList.contains('hidden')) {
-    closeReuseDateModal();
+  if (event.key === 'Escape' && saveTaskTemplateModal && !saveTaskTemplateModal.classList.contains('hidden')) {
+    closeSaveTaskTemplateModal();
+  }
+  if (event.key === 'Escape' && reuseTemplateModal && !reuseTemplateModal.classList.contains('hidden')) {
+    closeReuseTemplateModal();
   }
   if (event.key === 'Escape' && !scheduleTableModal.classList.contains('hidden')) {
     closeScheduleTableModal();
@@ -510,7 +524,8 @@ function canSaveJournalWithShortcut() {
     resetModal,
     taskEditModal,
     importChoiceModal,
-    reuseDateModal,
+    saveTaskTemplateModal,
+    reuseTemplateModal,
     scheduleTableModal,
     dailyPlanTableModal,
     journalViewModal,
@@ -573,17 +588,14 @@ registerDateInput(journalViewDate, {
 });
 registerDateInput(deleteStartDate);
 registerDateInput(deleteEndDate);
-registerDateInput(reuseSourceDate);
 registerDateInput(termStartDate);
 registerDateInput(termEndDate);
 registerDateInput(dailyPlanDate);
 registerDateInput(dailyPlanStartDate, { onCommit: constrainDailyPlanEndDate });
 registerDateInput(dailyPlanEndDate);
-chooseDataPathButton.addEventListener('click', chooseDataPath);
+if (changeStorageRootButton) changeStorageRootButton.addEventListener('click', chooseStorageRoot);
 if (openDataPathButton) openDataPathButton.addEventListener('click', openDataPath);
-if (chooseMediaDirectoryButton) chooseMediaDirectoryButton.addEventListener('click', chooseMediaDirectory);
 if (openMediaDirectoryButton) openMediaDirectoryButton.addEventListener('click', openMediaDirectory);
-if (changeSettingsPathButton) changeSettingsPathButton.addEventListener('click', chooseDataPath);
 if (openSettingsPathButton) openSettingsPathButton.addEventListener('click', openDataPath);
 if (openModelDirectoryButton) openModelDirectoryButton.addEventListener('click', openModelDirectory);
 if (addJournalTagButton) addJournalTagButton.addEventListener('click', addJournalTag);
@@ -605,12 +617,21 @@ confirmResetButton.addEventListener('click', confirmReset);
 resetModal.addEventListener('click', (event) => {
   if (event.target === resetModal) closeResetModal();
 });
-if (closeReuseDateModalButton) closeReuseDateModalButton.addEventListener('click', closeReuseDateModal);
-if (cancelReuseDateButton) cancelReuseDateButton.addEventListener('click', closeReuseDateModal);
-if (confirmReuseDateButton) confirmReuseDateButton.addEventListener('click', confirmReuseFromDate);
-if (reuseDateModal) {
-  reuseDateModal.addEventListener('click', (event) => {
-    if (event.target === reuseDateModal) closeReuseDateModal();
+if (closeSaveTaskTemplateModalButton) closeSaveTaskTemplateModalButton.addEventListener('click', closeSaveTaskTemplateModal);
+if (cancelSaveTaskTemplateButton) cancelSaveTaskTemplateButton.addEventListener('click', closeSaveTaskTemplateModal);
+if (saveTaskTemplateForm) saveTaskTemplateForm.addEventListener('submit', saveCurrentDayAsTemplate);
+if (taskTemplateName) taskTemplateName.addEventListener('input', clearTaskTemplateSaveError);
+if (saveTaskTemplateModal) {
+  saveTaskTemplateModal.addEventListener('click', (event) => {
+    if (event.target === saveTaskTemplateModal) closeSaveTaskTemplateModal();
+  });
+}
+if (closeReuseTemplateModalButton) closeReuseTemplateModalButton.addEventListener('click', closeReuseTemplateModal);
+if (cancelReuseTemplateButton) cancelReuseTemplateButton.addEventListener('click', closeReuseTemplateModal);
+if (confirmReuseTemplateButton) confirmReuseTemplateButton.addEventListener('click', confirmReuseTemplate);
+if (reuseTemplateModal) {
+  reuseTemplateModal.addEventListener('click', (event) => {
+    if (event.target === reuseTemplateModal) closeReuseTemplateModal();
   });
 }
 taskEditForm.addEventListener('submit', saveTaskEdit);
@@ -1892,6 +1913,7 @@ function handleDateStepButton(event) {
 
 function addTodayButtonsToDateInputs() {
   document.querySelectorAll('input[type="date"]').forEach((input) => {
+    if (input.dataset.hideTodayButton === 'true') return;
     const label = input.closest('label');
     const labelText = label && Array.from(label.children).find((child) => child.tagName === 'SPAN');
     if (!label || !labelText || !input.id) return;
@@ -3558,76 +3580,211 @@ async function addTaskForSelectedDate() {
   });
 }
 
-function openReuseDateModal() {
-  const targetDate = ensureSelectedDate();
-  const suggestedDate = shiftDate(targetDate, -1);
-  setDateInputValue(reuseSourceDate, suggestedDate);
-  reuseDateDescription.textContent = `将 ${suggestedDate} 或您选定日期的任务安排复制到 ${targetDate}。`;
-  closeImportChoiceModal();
-  reuseDateModal.classList.remove('hidden');
-  requestAnimationFrame(() => reuseSourceDate.focus());
-}
-
-function closeReuseDateModal() {
-  reuseDateModal.classList.add('hidden');
-}
-
-async function confirmReuseFromDate() {
-  const sourceDate = normalizeDate(reuseSourceDate.value);
-  const targetDate = ensureSelectedDate();
-  if (!sourceDate) {
-    setStatus('请选择要复用任务安排的日期。', 'error', 4000);
-    return;
-  }
-  if (sourceDate === targetDate) {
-    setStatus('来源日期不能与当前任务日期相同。', 'error', 4000);
-    return;
-  }
-
-  confirmReuseDateButton.disabled = true;
-  try {
-    await reuseTasksFromDate(sourceDate, targetDate);
-    closeReuseDateModal();
-  } finally {
-    confirmReuseDateButton.disabled = false;
-  }
-}
-
-async function reuseTasksFromDate(sourceDate, targetDate) {
-  const previousTasks = sortTasksForDisplay(tasks.filter((task) => {
-    return isRenderableTask(task) && normalizeDate(task.date) === sourceDate;
-  }));
-
-  if (previousTasks.length === 0) {
-    activePlanningDates.add(targetDate);
-    renderTasks();
-    setStatus(`选定日期 ${sourceDate} 没有可复用的安排。`, '', 5000);
-    return;
-  }
-
-  const clones = previousTasks.map((task, index) => ({
-    id: `reuse-${Date.now()}-${index}`,
+function templateItemsForDate(date) {
+  return sortTasksForDisplay(tasks.filter((task) => {
+    return isRenderableTask(task)
+      && normalizeDate(task.date) === normalizeDate(date)
+      && Boolean(clean(task.title))
+      && timeToMinutes(task.startTime) !== null
+      && timeToMinutes(task.endTime) !== null;
+  })).map((task) => ({
+    startTime: normalizeTime(task.startTime),
+    endTime: normalizeTime(task.endTime),
     title: clean(task.title),
-    startTime: clean(task.startTime),
-    endTime: clean(task.endTime),
-    date: targetDate,
-    weekday: weekdayFromDate(targetDate),
-    location: clean(task.location),
-    type: normalizeTaskType(task.type, task.title),
-    planDetails: '',
-    details: '',
-    status: '未评价',
-    rawText: '',
-    sheetName: '',
-    order: nextOrderForDate(targetDate) + index * 10,
-    isDraft: false
+    type: normalizeTaskType(task.type, task.title)
   }));
+}
 
-  tasks = mergeTasks(tasks, clones);
-  activePlanningDates.add(targetDate);
+function openSaveTaskTemplateModal() {
+  const date = ensureSelectedDate();
+  const items = templateItemsForDate(date);
+  if (items.length === 0) {
+    setStatus('当前日期没有可保存为模板的完整安排。', 'error', 4000);
+    return;
+  }
+
+  taskTemplateName.value = '';
+  taskTemplateSaveSummary.textContent = `将保存 ${items.length} 条安排，仅包含时间段、任务名和任务标签。`;
+  clearTaskTemplateSaveError();
+  saveTaskTemplateModal.classList.remove('hidden');
+  requestAnimationFrame(() => taskTemplateName.focus());
+}
+
+function closeSaveTaskTemplateModal() {
+  saveTaskTemplateModal.classList.add('hidden');
+  clearTaskTemplateSaveError();
+}
+
+function clearTaskTemplateSaveError() {
+  if (!taskTemplateSaveError) return;
+  taskTemplateSaveError.textContent = '';
+  taskTemplateSaveError.classList.add('hidden');
+}
+
+function showTaskTemplateSaveError(message) {
+  taskTemplateSaveError.textContent = message;
+  taskTemplateSaveError.classList.remove('hidden');
+}
+
+async function saveCurrentDayAsTemplate(event) {
+  event.preventDefault();
+  const name = clean(taskTemplateName.value);
+  const date = ensureSelectedDate();
+  const items = templateItemsForDate(date);
+  if (!name) {
+    showTaskTemplateSaveError('请输入模板名称。');
+    taskTemplateName.focus();
+    return;
+  }
+  if (items.length === 0) {
+    showTaskTemplateSaveError('当前日期没有可保存为模板的完整安排。');
+    return;
+  }
+
+  const templates = taskTemplates();
+  templates.push({
+    id: `task-template-${Date.now()}`,
+    name,
+    createdAt: new Date().toISOString(),
+    items
+  });
+  profile = { ...normalizedProfile(), taskTemplates: templates };
   await saveState();
-  renderTasks();
-  setStatus(`已从 ${sourceDate} 复用 ${clones.length} 条安排。`, 'hidden');
+  closeSaveTaskTemplateModal();
+  setStatus(`已保存安排模板“${name}”。`, '', 5000);
+}
+
+function openReuseTemplateModal() {
+  selectedTaskTemplateId = '';
+  expandedTaskTemplateId = '';
+  renderTaskTemplateList();
+  closeImportChoiceModal();
+  reuseTemplateModal.classList.remove('hidden');
+}
+
+function closeReuseTemplateModal() {
+  reuseTemplateModal.classList.add('hidden');
+  selectedTaskTemplateId = '';
+  expandedTaskTemplateId = '';
+}
+
+function renderTaskTemplateList() {
+  const templates = taskTemplates();
+  taskTemplateList.innerHTML = '';
+  taskTemplateEmpty.classList.toggle('hidden', templates.length > 0);
+
+  templates.forEach((template) => {
+    const item = document.createElement('article');
+    item.className = 'task-template-item';
+    item.classList.toggle('is-selected', template.id === selectedTaskTemplateId);
+    item.classList.toggle('is-expanded', template.id === expandedTaskTemplateId);
+
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'task-template-row';
+    row.setAttribute('aria-expanded', template.id === expandedTaskTemplateId ? 'true' : 'false');
+
+    const selection = document.createElement('span');
+    selection.className = 'task-template-selection';
+    selection.setAttribute('aria-hidden', 'true');
+
+    const name = document.createElement('strong');
+    name.textContent = template.name;
+
+    const count = document.createElement('span');
+    count.className = 'task-template-count';
+    count.textContent = `${template.items.length} 条安排`;
+
+    const toggle = document.createElement('span');
+    toggle.className = 'task-template-toggle';
+    toggle.textContent = template.id === expandedTaskTemplateId ? '收起' : '展开';
+    row.append(selection, name, count, toggle);
+    row.addEventListener('click', () => selectTaskTemplate(template.id));
+    item.appendChild(row);
+
+    if (template.id === expandedTaskTemplateId) {
+      const details = document.createElement('div');
+      details.className = 'task-template-details';
+      template.items.forEach((task) => details.appendChild(createTaskTemplatePreview(task)));
+      item.appendChild(details);
+    }
+    taskTemplateList.appendChild(item);
+  });
+
+  confirmReuseTemplateButton.disabled = !templates.some((template) => template.id === selectedTaskTemplateId);
+}
+
+function selectTaskTemplate(templateId) {
+  if (selectedTaskTemplateId === templateId) {
+    expandedTaskTemplateId = expandedTaskTemplateId === templateId ? '' : templateId;
+  } else {
+    selectedTaskTemplateId = templateId;
+    expandedTaskTemplateId = templateId;
+  }
+  renderTaskTemplateList();
+}
+
+function createTaskTemplatePreview(task) {
+  const row = document.createElement('div');
+  row.className = 'task-template-preview';
+
+  const time = document.createElement('span');
+  time.className = 'task-template-time';
+  time.textContent = `${task.startTime} - ${task.endTime}`;
+
+  const title = document.createElement('span');
+  title.className = 'task-template-title';
+  title.textContent = task.title;
+
+  const type = document.createElement('span');
+  type.className = `task-template-type type-${task.type}`;
+  type.textContent = task.type;
+  row.append(time, title, type);
+  return row;
+}
+
+async function confirmReuseTemplate() {
+  const template = taskTemplates().find((item) => item.id === selectedTaskTemplateId);
+  if (!template) {
+    setStatus('请选择要复用的安排模板。', 'error', 4000);
+    return;
+  }
+
+  confirmReuseTemplateButton.disabled = true;
+  try {
+    const targetDate = ensureSelectedDate();
+    const baseOrder = nextOrderForDate(targetDate);
+    const timestamp = Date.now();
+    const clones = template.items.map((task, index) => ({
+      id: `template-reuse-${timestamp}-${index}`,
+      title: task.title,
+      startTime: task.startTime,
+      endTime: task.endTime,
+      date: targetDate,
+      weekday: weekdayFromDate(targetDate),
+      location: '',
+      type: task.type,
+      planDetails: '',
+      details: '',
+      status: '未评价',
+      rawText: '',
+      sheetName: '',
+      source: 'task-template',
+      splitParentId: '',
+      order: baseOrder + index * 10,
+      isDraft: false
+    }));
+
+    tasks = mergeTasks(tasks, clones);
+    activePlanningDates.add(targetDate);
+    await saveState();
+    closeReuseTemplateModal();
+    renderTasks();
+    setStatus(`已复用模板“${template.name}”，添加 ${clones.length} 条安排。`, '', 5000);
+  } catch (error) {
+    confirmReuseTemplateButton.disabled = false;
+    setStatus(`复用模板失败：${error.message}`, 'error', 5000);
+  }
 }
 
 function createBlankTask(date) {
@@ -5492,6 +5649,7 @@ function defaultProfile() {
     workFocusLength: 50,
     workBreakLength: 10,
     journalTags: defaultJournalTags(),
+    taskTemplates: [],
     defaultsVersion: '0.2.0'
   };
 }
@@ -5507,8 +5665,50 @@ function normalizedProfile() {
   return {
     ...defaultProfile(),
     ...systemTimeProfile,
-    journalTags: normalizeJournalTags(systemTimeProfile.journalTags)
+    journalTags: normalizeJournalTags(systemTimeProfile.journalTags),
+    taskTemplates: normalizeTaskTemplates(systemTimeProfile.taskTemplates)
   };
+}
+
+function normalizeTaskTemplates(value) {
+  if (!Array.isArray(value)) return [];
+  const seenIds = new Set();
+  return value.map((template, templateIndex) => {
+    if (!template || typeof template !== 'object') return null;
+    const name = clean(template.name).slice(0, 40);
+    const items = (Array.isArray(template.items) ? template.items : []).map((task) => {
+      const title = clean(task && task.title);
+      const startTime = normalizeTime(task && task.startTime);
+      const endTime = normalizeTime(task && task.endTime);
+      if (!title || timeToMinutes(startTime) === null || timeToMinutes(endTime) === null) return null;
+      return {
+        startTime,
+        endTime,
+        title,
+        type: normalizeTaskType(task && task.type, title)
+      };
+    }).filter(Boolean);
+    if (!name || items.length === 0) return null;
+
+    const requestedId = clean(template.id);
+    let id = requestedId || `task-template-${templateIndex + 1}`;
+    let suffix = 2;
+    while (seenIds.has(id)) {
+      id = `${requestedId || `task-template-${templateIndex + 1}`}-${suffix}`;
+      suffix += 1;
+    }
+    seenIds.add(id);
+    return {
+      id,
+      name,
+      createdAt: clean(template.createdAt),
+      items
+    };
+  }).filter(Boolean);
+}
+
+function taskTemplates() {
+  return normalizeTaskTemplates(profile && profile.taskTemplates);
 }
 
 function loadProfileToForm() {
@@ -5782,6 +5982,11 @@ function migrateProfileDefaults(profileData) {
     migrated.journalTags = normalizedTags;
     changed = true;
   }
+  const normalizedTemplates = normalizeTaskTemplates(migrated.taskTemplates);
+  if (JSON.stringify(migrated.taskTemplates || []) !== JSON.stringify(normalizedTemplates)) {
+    migrated.taskTemplates = normalizedTemplates;
+    changed = true;
+  }
   if (migrated.defaultsVersion !== '0.2.0') {
     if (Number(migrated.classDuration) === 45) {
       migrated.classDuration = 50;
@@ -5842,14 +6047,27 @@ async function saveState() {
   updateStoragePathView();
 }
 
-async function chooseDataPath() {
+async function chooseStorageRoot() {
+  if (asrModelDownloadInFlight || (latestAsrModelStatus && latestAsrModelStatus.state === 'downloading')) {
+    setStatus('模型正在下载，请完成后再更改存放位置。', 'error', 4000);
+    return;
+  }
+
+  changeStorageRootButton.disabled = true;
+  changeStorageRootButton.textContent = '迁移中…';
+  setStatus('请选择新的日织内容存放文件夹。迁移期间请勿关闭软件。', '');
   try {
-    const result = await window.whbr.chooseDataPath({ tasks, journals, profile });
+    const result = await window.whbr.chooseStorageRoot({ tasks, journals, profile });
     if (result.canceled) return;
     applyStorageMigrationResult(result);
-    showStorageMigrationStatus(result, '本地数据');
+    if (result.modelStatus) updateAsrModelStatus(result.modelStatus);
+    showStorageRootMigrationStatus(result);
   } catch (error) {
-    setStatus(`迁移本地数据失败：${error.message || String(error)}`, 'error', 6000);
+    setStatus(`迁移本地内容失败：${error.message || String(error)}`, 'error', 7000);
+    await refreshAsrModelStatus();
+  } finally {
+    changeStorageRootButton.disabled = false;
+    changeStorageRootButton.textContent = '更改';
   }
 }
 
@@ -5903,21 +6121,6 @@ async function deleteJournalMediaItems(journal, targetDate, fallbackTitle, media
   setStatus(`已删除 ${selectedMedia.length} 个附件。`, 'hidden');
 }
 
-async function chooseMediaDirectory() {
-  try {
-    const result = await window.whbr.media.chooseDirectory({ tasks, journals, profile });
-    if (!result || result.canceled) return;
-    if (!result.ok) {
-      setStatus(`迁移媒体文件失败：${result.error && result.error.message ? result.error.message : '未知错误'}`, 'error', 5000);
-      return;
-    }
-    applyStorageMigrationResult(result);
-    showStorageMigrationStatus(result, '照片和视频');
-  } catch (error) {
-    setStatus(`迁移媒体文件失败：${error.message || String(error)}`, 'error', 6000);
-  }
-}
-
 function applyStorageMigrationResult(result) {
   if (result && result.data) {
     tasks = Array.isArray(result.data.tasks) ? result.data.tasks : tasks;
@@ -5932,19 +6135,19 @@ function applyStorageMigrationResult(result) {
   updateStoragePathView();
 }
 
-function showStorageMigrationStatus(result, label) {
+function showStorageRootMigrationStatus(result) {
   if (result && result.migration && result.migration.skipped) {
-    setStatus(`${label}存放地址未改变。`, '', 3000);
+    setStatus('本地内容存放位置未改变。', '', 3000);
     return;
   }
   const warnings = result && result.migration && Array.isArray(result.migration.cleanupWarnings)
     ? result.migration.cleanupWarnings
     : [];
   if (warnings.length > 0) {
-    setStatus(`${label}已迁移，但旧位置有部分内容无法删除，请关闭占用文件后手动清理。`, 'error', 7000);
+    setStatus('本地内容已迁移，但旧位置有部分内容无法删除，请关闭占用文件后手动清理。', 'error', 7000);
     return;
   }
-  setStatus(`${label}已迁移，旧位置中的日织内容已删除。`, '', 5000);
+  setStatus('本地内容已迁移，原有文件结构已保留，旧位置中的内容已删除。', '', 6000);
 }
 
 async function openMediaDirectory() {
@@ -6176,6 +6379,7 @@ async function deleteSelectedPeriod(selectedContents) {
 }
 
 function updateStoragePathView() {
+  if (storageRootPath) storageRootPath.textContent = storagePaths.storageRoot || storagePaths.dataDirectory || '尚未生成';
   dataFilePath.textContent = storagePaths.dataFilePath || '尚未生成';
   settingsFilePath.textContent = storagePaths.settingsFilePath || '尚未生成';
   if (mediaDirectoryPath) mediaDirectoryPath.textContent = storagePaths.mediaDirectory || '尚未生成';

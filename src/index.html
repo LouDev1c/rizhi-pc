@@ -81,6 +81,7 @@
                     </div>
                   </div>
                 </label>
+                <button id="saveTaskTemplateButton" class="secondary-button" type="button">保存为模板</button>
                 <button id="importMoreButton" class="secondary-button">批量创建任务</button>
               </div>
             </div>
@@ -246,12 +247,20 @@
                 <h2>数据文件</h2>
 
                 <div class="path-list">
+                  <div class="path-row storage-root-row">
+                    <span>本地内容存放位置</span>
+                    <div class="path-control">
+                      <code id="storageRootPath">加载中...</code>
+                      <div class="path-actions">
+                        <button id="changeStorageRootButton" class="secondary-button" type="button">更改</button>
+                      </div>
+                    </div>
+                  </div>
                   <div class="path-row">
                     <span>当前月份数据文件</span>
                     <div class="path-control">
                       <code id="dataFilePath">加载中...</code>
                       <div class="path-actions">
-                        <button id="chooseDataPathButton" class="secondary-button" type="button">更改</button>
                         <button id="openDataPathButton" class="secondary-button" type="button">打开</button>
                       </div>
                     </div>
@@ -261,7 +270,6 @@
                     <div class="path-control">
                       <code id="settingsFilePath">加载中...</code>
                       <div class="path-actions">
-                        <button id="changeSettingsPathButton" class="secondary-button" type="button" title="数据文件和设置文件会一起迁移">更改</button>
                         <button id="openSettingsPathButton" class="secondary-button" type="button">打开</button>
                       </div>
                     </div>
@@ -271,7 +279,6 @@
                     <div class="path-control">
                       <code id="mediaDirectoryPath">加载中...</code>
                       <div class="path-actions">
-                        <button id="chooseMediaDirectoryButton" class="secondary-button" type="button">更改</button>
                         <button id="openMediaDirectoryButton" class="secondary-button" type="button">打开</button>
                       </div>
                     </div>
@@ -523,7 +530,7 @@
             <h3>每日安排</h3>
             <p class="muted">适合某一天或一段日期内的工作、学习、生活规划。</p>
             <div class="import-choice-actions">
-              <button id="reusePreviousButton" class="secondary-button" type="button">复用特定日期</button>
+              <button id="reuseTemplateButton" class="secondary-button" type="button">复用模板</button>
               <button id="manualDailyPlanButton" class="primary-button" type="button">填写安排内容</button>
             </div>
           </section>
@@ -531,28 +538,46 @@
       </div>
     </div>
 
-    <div id="reuseDateModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="reuseDateTitle">
+    <div id="saveTaskTemplateModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="saveTaskTemplateTitle">
       <div class="modal-card small-modal">
         <div class="modal-header">
           <div>
-            <p class="eyebrow">复用任务安排</p>
-            <h2 id="reuseDateTitle">选择要复用的日期</h2>
+            <p class="eyebrow">安排模板</p>
+            <h2 id="saveTaskTemplateTitle">保存当日安排为模板</h2>
           </div>
-          <button id="closeReuseDateModalButton" class="icon-button" aria-label="关闭">×</button>
+          <button id="closeSaveTaskTemplateModalButton" class="icon-button" aria-label="关闭">×</button>
         </div>
 
-        <div class="manual-form">
-          <p id="reuseDateDescription" class="muted">将选定日期的任务安排复制到当前日期。</p>
+        <form id="saveTaskTemplateForm" class="manual-form">
           <label class="field">
-            <span>来源日期</span>
-            <div class="date-stepper">
-              <input id="reuseSourceDate" type="date" />
-            </div>
+            <span>模板名称</span>
+            <input id="taskTemplateName" type="text" maxlength="40" autocomplete="off" placeholder="例如：工作日安排" />
           </label>
+          <p id="taskTemplateSaveSummary" class="muted task-template-save-summary"></p>
+          <p id="taskTemplateSaveError" class="form-error hidden" role="alert"></p>
           <div class="modal-actions">
-            <button id="cancelReuseDateButton" class="secondary-button" type="button">取消</button>
-            <button id="confirmReuseDateButton" class="primary-button" type="button">确认复用</button>
+            <button id="cancelSaveTaskTemplateButton" class="secondary-button" type="button">取消</button>
+            <button class="primary-button" type="submit">保存模板</button>
           </div>
+        </form>
+      </div>
+    </div>
+
+    <div id="reuseTemplateModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="reuseTemplateTitle">
+      <div class="modal-card task-template-modal-card">
+        <div class="modal-header">
+          <div>
+            <p class="eyebrow">安排模板</p>
+            <h2 id="reuseTemplateTitle">复用模板</h2>
+          </div>
+          <button id="closeReuseTemplateModalButton" class="icon-button" aria-label="关闭">×</button>
+        </div>
+
+        <div id="taskTemplateList" class="task-template-list"></div>
+        <p id="taskTemplateEmpty" class="muted task-template-empty hidden">尚未保存安排模板。</p>
+        <div class="modal-actions task-template-modal-actions">
+          <button id="cancelReuseTemplateButton" class="secondary-button" type="button">取消</button>
+          <button id="confirmReuseTemplateButton" class="primary-button" type="button" disabled>确认复用</button>
         </div>
       </div>
     </div>

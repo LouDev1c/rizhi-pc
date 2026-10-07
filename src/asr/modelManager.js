@@ -15,6 +15,7 @@ const {
   getUserDataModelDirectory,
   resolveModelDirectory
 } = require('./asrModelConfig');
+const { readModelLocation, migrateModelDirectory } = require('./modelLocation');
 
 const execFileAsync = promisify(execFile);
 const INSTALL_MANIFEST_FILE = '.rizhi-asr-model.json';
@@ -37,6 +38,8 @@ class AsrModelManager {
     this.app = app;
     this.modelConfig = modelConfig;
     this.developmentModelDirectory = developmentModelDirectory;
+    this.modelDirectory = readModelLocation(app, modelConfig.modelId);
+    this.migrationPromise = null;
     this.downloadPromise = null;
     this.downloadState = 'not-installed';
     this.downloadProgress = null;
@@ -46,6 +49,7 @@ class AsrModelManager {
   getDirectoryInfo() {
     return resolveModelDirectory(this.app, {
       modelConfig: this.modelConfig,
+      modelDirectory: this.modelDirectory,
       developmentModelDirectory: this.developmentModelDirectory
     });
   }
@@ -60,7 +64,39 @@ class AsrModelManager {
   }
 
   getDownloadDirectory() {
-    return getUserDataModelDirectory(this.app, this.modelConfig);
+    return this.modelDirectory || getUserDataModelDirectory(this.app, this.modelConfig);
+  }
+
+  async changeDirectory(selectedParent) {
+    if (this.downloadPromise || this.migrationPromise) {
+      throw new AsrModelManagerError('ASR_MODEL_BUSY', '模型正在下载或迁移，请稍后更改路径。');
+    }
+    if (this.getDirectoryInfo().source === 'development') {
+      throw new AsrModelManagerError('ASR_DEVELOPMENT_PATH', '当前使用开发模型路径，请先取消 RIZHI_ASR_MODEL_DIR 配置并重启软件。');
+    }
+    this.migrationPromise = this.changeDirectoryInternal(selectedParent).finally(() => { this.migrationPromise = null; });
+    return this.migrationPromise;
+  }
+
+  async changeDirectoryInternal(selectedParent) {
+    const current = await this.inspect();
+    const result = await migrateModelDirectory({
+      app: this.app,
+      modelId: this.modelConfig.modelId,
+      source: this.getDownloadDirectory(),
+      selectedParent,
+      validate: current.isReady ? async (directory) => {
+        const checked = await validateModelDirectory(directory, this.modelConfig, { verifyHashes: true });
+        if (checked.missingFiles.length || checked.invalidFiles.length) {
+          throw new AsrModelManagerError('ASR_MIGRATION_CHECKSUM_FAILED', '迁移后的模型完整性校验失败，已保留原模型。');
+        }
+      } : null
+    });
+    this.modelDirectory = result.directory;
+    this.downloadState = 'not-installed';
+    this.downloadProgress = null;
+    this.lastDownloadError = null;
+    return { ...result, modelStatus: await this.getStatus() };
   }
 
   async initialize() {
@@ -111,6 +147,7 @@ class AsrModelManager {
   }
 
   async download(onProgress) {
+    if (this.migrationPromise) throw new AsrModelManagerError('ASR_MODEL_BUSY', '模型正在迁移，请稍后使用。');
     if (this.downloadPromise) return this.downloadPromise;
     if (this.getDirectoryInfo().source === 'development') return this.getStatus();
     this.downloadPromise = this.downloadInternal(onProgress).finally(() => {
@@ -132,7 +169,7 @@ class AsrModelManager {
       throw new AsrModelManagerError('ASR_DOWNLOAD_CONFIG_MISSING', 'ASR 模型缺少官方下载配置。');
     }
 
-    const finalDirectory = getUserDataModelDirectory(this.app, this.modelConfig);
+    const finalDirectory = this.getDownloadDirectory();
     const parentDirectory = path.dirname(finalDirectory);
     let stagingDirectory = '';
     this.downloadState = 'downloading';

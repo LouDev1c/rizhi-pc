@@ -18,7 +18,7 @@ contextBridge.exposeInMainWorld('whbr', {
   loadData: () => ipcRenderer.invoke('data:load'),
   saveData: (data) => ipcRenderer.invoke('data:save', data),
   getStoragePaths: () => ipcRenderer.invoke('data:getPaths'),
-  chooseDataPath: (data) => ipcRenderer.invoke('data:choosePath', data),
+  chooseStorageRoot: (data) => ipcRenderer.invoke('storage:chooseRoot', data),
   openDataPath: () => ipcRenderer.invoke('data:openDirectory'),
   resetData: (data, options) => ipcRenderer.invoke('data:reset', { data, options }),
   media: {
@@ -28,7 +28,6 @@ contextBridge.exposeInMainWorld('whbr', {
     deleteForDates: (dates) => ipcRenderer.invoke('media:deleteForDates', dates),
     deleteItems: (mediaItems) => ipcRenderer.invoke('media:deleteItems', mediaItems),
     repairLive: (media) => ipcRenderer.invoke('media:repairLive', media),
-    chooseDirectory: (data) => ipcRenderer.invoke('media:chooseDirectory', data),
     openDirectory: () => ipcRenderer.invoke('media:openDirectory'),
     getFileUrl: (relativePath, mediaRoot) => ipcRenderer.invoke('media:getFileUrl', relativePath, mediaRoot),
     onUploaded: (listener) => subscribeToAsrEvent('media:uploaded', listener),

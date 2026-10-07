@@ -5,8 +5,7 @@ const path = require('path');
 const {
   getStoragePaths,
   saveData,
-  setMediaDirectory,
-  setStorageDirectory
+  setStorageRoot
 } = require('../src/storage/localDataStore');
 
 (async () => {
@@ -32,6 +31,9 @@ const {
     await fs.writeFile(initialMediaFile, 'media-one');
     const unrelatedFile = path.join(initialPaths.dataDirectory, 'keep-me.txt');
     await fs.writeFile(unrelatedFile, 'user-file');
+    const nestedUnrelatedFile = path.join(initialPaths.dataDirectory, 'custom', 'nested', 'keep-too.txt');
+    await fs.mkdir(path.dirname(nestedUnrelatedFile), { recursive: true });
+    await fs.writeFile(nestedUnrelatedFile, 'nested-user-file');
 
     const data = {
       version: 2,
@@ -46,40 +48,25 @@ const {
     };
     await saveData(app, data);
 
-    const nextDataDirectory = path.join(testRoot, 'migrated-data');
-    const dataMigration = await setStorageDirectory(app, nextDataDirectory, data);
-    const migratedMediaRoot = path.join(nextDataDirectory, 'images');
-    assert.equal(dataMigration.paths.dataDirectory, nextDataDirectory);
+    const nextStorageRoot = path.join(testRoot, 'migrated-root');
+    const dataMigration = await setStorageRoot(app, nextStorageRoot, data);
+    const migratedMediaRoot = path.join(nextStorageRoot, 'images');
+    assert.equal(dataMigration.paths.storageRoot, nextStorageRoot);
+    assert.equal(dataMigration.paths.dataDirectory, nextStorageRoot);
+    assert.equal(dataMigration.paths.settingsFilePath, path.join(nextStorageRoot, 'rizhi-settings.json'));
+    assert.equal(dataMigration.paths.settingsLocationPath, path.join(userData, 'rizhi-settings-location.json'));
+    assert.equal(dataMigration.paths.mediaDirectory, migratedMediaRoot);
     assert.equal(dataMigration.data.journals[0].media[0].mediaRoot, migratedMediaRoot);
     assert.equal(await fs.readFile(path.join(migratedMediaRoot, ...mediaRelativePath.split('/')), 'utf8'), 'media-one');
     await assert.rejects(fs.access(initialMediaFile), /ENOENT/);
     await assert.rejects(fs.access(path.join(initialPaths.dataDirectory, 'rizhi-data-2026-09.json')), /ENOENT/);
-    assert.equal(await fs.readFile(unrelatedFile, 'utf8'), 'user-file');
+    assert.equal(await fs.readFile(path.join(nextStorageRoot, 'keep-me.txt'), 'utf8'), 'user-file');
+    assert.equal(await fs.readFile(path.join(nextStorageRoot, 'custom', 'nested', 'keep-too.txt'), 'utf8'), 'nested-user-file');
+    await assert.rejects(fs.access(initialPaths.dataDirectory), /ENOENT/);
 
-    const secondRelativePath = '2026-10/2026-10-01/photo-two.jpg';
-    const secondSource = path.join(migratedMediaRoot, ...secondRelativePath.split('/'));
-    await fs.mkdir(path.dirname(secondSource), { recursive: true });
-    await fs.writeFile(secondSource, 'media-two');
-    const dataWithSecondMedia = {
-      ...dataMigration.data,
-      journals: dataMigration.data.journals.map((journal) => ({
-        ...journal,
-        media: [...journal.media, {
-          id: 'media-2',
-          kind: 'image',
-          sourcePath: secondRelativePath,
-          mediaRoot: migratedMediaRoot
-        }]
-      }))
-    };
-    await saveData(app, dataWithSecondMedia);
-
-    const nextMediaDirectory = path.join(testRoot, 'migrated-media');
-    const mediaMigration = await setMediaDirectory(app, nextMediaDirectory, dataWithSecondMedia);
-    assert.equal(mediaMigration.paths.mediaDirectory, nextMediaDirectory);
-    assert.ok(mediaMigration.data.journals[0].media.every((item) => item.mediaRoot === nextMediaDirectory));
-    assert.equal(await fs.readFile(path.join(nextMediaDirectory, ...secondRelativePath.split('/')), 'utf8'), 'media-two');
-    await assert.rejects(fs.access(secondSource), /ENOENT/);
+    const reloadedPaths = await getStoragePaths(app);
+    assert.equal(reloadedPaths.storageRoot, nextStorageRoot);
+    assert.equal(reloadedPaths.mediaDirectory, migratedMediaRoot);
 
     console.log('localDataStore migration tests passed');
   } finally {

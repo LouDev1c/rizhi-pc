@@ -392,37 +392,43 @@ h2 {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 20px;
-  padding: 18px 20px;
+  gap: 14px;
+  padding: 14px 16px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface);
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 
 .toolbar-actions {
-  flex-wrap: wrap;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  align-items: flex-end;
   justify-content: flex-end;
+  gap: 8px;
 }
 
 .toolbar-heading {
   display: flex;
-  align-items: baseline;
-  gap: 16px;
+  align-items: center;
+  gap: 14px;
   min-width: 0;
   flex: 1 1 auto;
+  flex-wrap: nowrap;
+  white-space: nowrap;
 }
 
 .task-duration-summary {
   display: flex;
-  flex: 1 1 auto;
-  flex-wrap: wrap;
-  gap: 2px 14px;
-  max-width: min(620px, 54vw);
-  max-height: 56px;
-  overflow: hidden;
+  flex: 0 1 auto;
+  flex-wrap: nowrap;
+  gap: 10px;
+  max-width: none;
   color: var(--muted);
   font-size: 13px;
   line-height: 1.35;
+  white-space: nowrap;
 }
 
 .task-duration-summary span {
@@ -432,6 +438,8 @@ h2 {
 .toolbar-actions .secondary-button,
 .toolbar-actions .primary-button {
   min-width: 106px;
+  padding: 0 12px;
+  white-space: nowrap;
 }
 
 .toolbar h2 {
@@ -2670,6 +2678,169 @@ h2 {
   width: min(520px, 100%);
 }
 
+.task-template-save-summary {
+  margin: 8px 0 0;
+  line-height: 1.6;
+}
+
+.task-template-modal-card {
+  display: flex;
+  width: min(720px, 100%);
+  max-height: calc(100vh - 48px);
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.task-template-list {
+  display: grid;
+  min-height: 0;
+  max-height: min(58vh, 560px);
+  gap: 10px;
+  overflow-y: auto;
+  padding-right: 5px;
+  scrollbar-gutter: stable;
+}
+
+.task-template-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fbfcfd;
+  overflow: hidden;
+}
+
+.task-template-item.is-selected {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.task-template-row {
+  display: grid;
+  width: 100%;
+  min-height: 58px;
+  grid-template-columns: 20px minmax(0, 1fr) auto 52px;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+
+.task-template-row:hover,
+.task-template-row:focus-visible {
+  background: #f0f5f2;
+  outline: none;
+}
+
+.task-template-selection {
+  width: 16px;
+  height: 16px;
+  border: 1px solid #9aa5b1;
+  border-radius: 50%;
+  background: #ffffff;
+}
+
+.task-template-item.is-selected .task-template-selection {
+  border: 5px solid var(--accent);
+}
+
+.task-template-row strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-template-count,
+.task-template-toggle {
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.task-template-toggle {
+  text-align: right;
+}
+
+.task-template-details {
+  display: grid;
+  gap: 7px;
+  padding: 10px 14px 14px 46px;
+  border-top: 1px solid var(--border);
+  background: #ffffff;
+}
+
+.task-template-preview {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 34px;
+}
+
+.task-template-time {
+  color: #394652;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.task-template-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.task-template-type {
+  min-width: 48px;
+  padding: 4px 8px;
+  border: 1px solid #cfd5dc;
+  border-radius: 6px;
+  text-align: center;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.task-template-type.type-工作 {
+  border-color: #c7d2e7;
+  background: #eef3fb;
+  color: #2d4d7b;
+}
+
+.task-template-type.type-课程 {
+  border-color: #b9d9ca;
+  background: #edf7f2;
+  color: var(--accent-dark);
+}
+
+.task-template-type.type-学习 {
+  border-color: #ded2b9;
+  background: #fffaf0;
+  color: var(--warning);
+}
+
+.task-template-type.type-生活 {
+  border-color: #d6cadf;
+  background: #f5f1f8;
+  color: #644775;
+}
+
+.task-template-empty {
+  margin: 6px 0;
+  padding: 28px 16px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  text-align: center;
+}
+
+.task-template-modal-actions {
+  flex: 0 0 auto;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
 .wide-modal {
   width: min(760px, 100%);
 }
@@ -3010,7 +3181,6 @@ h2 {
     grid-template-columns: 1fr;
   }
 
-  .toolbar-heading,
   .stats-visual-head,
   .profile-stats-head {
     display: grid;
