@@ -330,14 +330,34 @@ const tutorialSteps = [
     page: 'tasks',
     targetSelector: '#importMoreButton',
     title: '批量创建任务',
-    text: '点击这个按钮，可手动填写或导入文件生成课表，也可以复用已经保存的安排模板。'
+    text: '这里可以手动填写或导入课表、复用安排模板，也可以为单日或连续多日填写每日安排。每日安排还支持使用本地语音识别批量生成任务。'
+  },
+  {
+    page: 'tasks',
+    targetSelector: '#saveTaskTemplateButton',
+    title: '保存安排模板',
+    text: '将当前日期的完整安排保存为模板后，可以在“批量创建任务”中复用。模板只保存时间段、任务名称和任务标签，不会带入完成记录。'
   },
   {
     page: 'records',
     recordsView: 'editor',
     targetSelector: '.journal-editor',
     title: '每日生活记录',
-    text: '这里用于写下当天的活动、状态和复盘内容。填写区内容较多时会在文本框内滚动，页面本身保持稳定。'
+    text: '选择日期和标签后，可以写下当天发生的事、状态与复盘内容。切换日期或离开记录页时，如果内容尚未保存，软件会先询问如何处理。'
+  },
+  {
+    page: 'records',
+    recordsView: 'editor',
+    targetSelector: '#journalVoiceStartButton',
+    title: '语音填写记录',
+    text: '语音会在本机识别并逐段插入记录文本。首次使用需要下载离线语音模型；识别结果仍可修改，并需要点击“保存记录”后才会写入数据。'
+  },
+  {
+    page: 'records',
+    recordsView: 'editor',
+    targetSelector: '#openMediaUploadButton',
+    title: '归档照片和视频',
+    text: '电脑和手机连接同一局域网时，可以扫描二维码上传照片、动态图片和视频。确认后，附件会归档到当前记录日期。'
   },
   {
     page: 'records',
@@ -351,7 +371,7 @@ const tutorialSteps = [
     recordsView: 'list',
     targetSelector: '#journalFilterModeButton',
     title: '记录列表',
-    text: '这个按钮有三档：显示全部、日期记录、标签记录。显示全部会列出所有记录，日期记录会按选定日期筛选，标签记录会按色块标签筛选；点击记录条即可查看当天详情。'
+    text: '筛选按钮可切换“显示全部”“日期记录”和“标签记录”，左侧搜索框还能检索记录文字。点击记录条可查看生活记录、任务完成情况以及当天归档的附件。'
   },
   {
     page: 'profile',
@@ -365,7 +385,14 @@ const tutorialSteps = [
     settingPanel: 'data',
     targetSelector: '.settings-data-panel',
     title: '数据文件',
-    text: '这里显示日织内容的统一存放位置和各类文件地址。更改存放位置时，数据、设置、媒体和语音模型会一起迁移。'
+    text: '这里显示日织内容的统一存放位置，以及数据、设置、媒体和语音模型的实际路径。更改存放位置时，这些内容会一起迁移。'
+  },
+  {
+    page: 'settings',
+    settingPanel: 'danger',
+    targetSelector: '.danger-panel',
+    title: '删除本地内容',
+    text: '可以按单日或日期范围删除任务、生活记录和附件，也可以重置全部本地内容。删除前需要选择具体范围并再次确认。'
   },
   {
     page: 'settings',
@@ -380,6 +407,13 @@ const tutorialSteps = [
     targetSelector: '.settings-reminder-panel',
     title: '周期设置',
     text: '课程、工作和学习的提醒周期在这里调整，日织会按这些信息提醒你专注、休息或活动身体。'
+  },
+  {
+    page: 'settings',
+    settingPanel: 'asr-test',
+    targetSelector: '.settings-asr-test-panel',
+    title: '离线语音识别',
+    text: '这里可以下载和检查离线语音模型、选择麦克风，并分别测试输入波形和识别结果。模型安装完成后，记录与任务语音都在本机处理。'
   },
   {
     page: 'tasks',
