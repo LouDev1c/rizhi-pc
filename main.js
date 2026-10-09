@@ -20,6 +20,16 @@ const scheduleFileExtensions = ['xlsx', 'xls', 'csv', 'tsv'];
 const allowedExtensions = new Set(scheduleFileExtensions.map((extension) => `.${extension}`));
 const appIconPath = resolveAppIconPath();
 let mainWindow = null;
+let floatingTaskWindow = null;
+let floatingTaskPayload = null;
+let floatingTaskAlwaysOnTop = true;
+let floatingTaskFlashTimer = null;
+let floatingTaskWindowReady = false;
+let pendingFloatingTaskFlashes = 0;
+let floatingTaskDockEdge = '';
+let floatingTaskDockDisplayId = null;
+let floatingTaskDockTimer = null;
+let floatingTaskPositionIgnoreUntil = 0;
 let reminderWindow = null;
 let reminderCloseTimer = null;
 let reminderQueue = [];
@@ -58,6 +68,10 @@ function createWindow() {
 
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
   configureMicrophonePermissionPolicy(mainWindow);
+
+  mainWindow.on('minimize', () => {
+    showFloatingTaskWindow();
+  });
 
   mainWindow.on('close', async (event) => {
     if (isQuitting) return;
@@ -168,6 +182,7 @@ function formatVersionLabel(version) {
 app.whenReady().then(() => {
   createApplicationMenu();
   createWindow();
+  showFloatingTaskWindow();
   createTray();
   setupAutoUpdater();
 
@@ -290,6 +305,218 @@ function showMainWindow() {
 function hideMainWindow() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   mainWindow.hide();
+  showFloatingTaskWindow();
+}
+
+function createFloatingTaskWindow() {
+  if (floatingTaskWindow && !floatingTaskWindow.isDestroyed()) return floatingTaskWindow;
+
+  const display = mainWindow && !mainWindow.isDestroyed()
+    ? screen.getDisplayMatching(mainWindow.getBounds())
+    : screen.getPrimaryDisplay();
+  const workArea = display.workArea;
+  const width = 252;
+  const height = 124;
+  const margin = 24;
+
+  floatingTaskWindow = new BrowserWindow({
+    width,
+    height,
+    x: workArea.x + workArea.width - width - margin,
+    y: workArea.y + workArea.height - height - margin,
+    minWidth: width,
+    minHeight: height,
+    maxWidth: width,
+    maxHeight: 420,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    maximizable: false,
+    minimizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    alwaysOnTop: floatingTaskAlwaysOnTop,
+    title: '日织 · 当前任务',
+    icon: appIconPath,
+    webPreferences: {
+      preload: path.join(__dirname, 'floatingTaskPreload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      backgroundThrottling: false
+    }
+  });
+  applyFloatingTaskAlwaysOnTop();
+  floatingTaskWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  floatingTaskWindow.loadFile(path.join(__dirname, 'src', 'floating-task.html'));
+  floatingTaskWindow.webContents.on('did-finish-load', () => {
+    floatingTaskWindowReady = true;
+    sendFloatingTaskUpdate();
+    sendPendingFloatingTaskFlashes();
+  });
+  floatingTaskWindow.on('closed', () => {
+    floatingTaskWindow = null;
+    floatingTaskWindowReady = false;
+  });
+  floatingTaskWindow.on('moved', scheduleFloatingTaskDockCheck);
+  floatingTaskWindow.on('focus', () => {
+    // Windows may deliver a click on the narrow dock tab to the native drag region
+    // before the renderer button receives it. Focusing the docked window is therefore
+    // also treated as an explicit request to reveal it.
+    if (floatingTaskDockEdge) expandFloatingTaskWindow();
+  });
+  floatingTaskWindow.on('blur', () => {
+    if (floatingTaskAlwaysOnTop) applyFloatingTaskAlwaysOnTop();
+  });
+  return floatingTaskWindow;
+}
+
+function applyFloatingTaskAlwaysOnTop() {
+  if (!floatingTaskWindow || floatingTaskWindow.isDestroyed()) return;
+  floatingTaskWindow.setAlwaysOnTop(floatingTaskAlwaysOnTop, floatingTaskAlwaysOnTop ? 'screen-saver' : 'normal');
+  if (floatingTaskAlwaysOnTop) floatingTaskWindow.moveTop();
+}
+
+function showFloatingTaskWindow() {
+  if (isQuitting) return;
+  const window = createFloatingTaskWindow();
+  window.showInactive();
+  applyFloatingTaskAlwaysOnTop();
+  sendFloatingTaskUpdate();
+}
+
+function hideFloatingTaskWindow() {
+  if (!floatingTaskWindow || floatingTaskWindow.isDestroyed()) return;
+  floatingTaskWindow.hide();
+}
+
+function scheduleFloatingTaskDockCheck() {
+  if (Date.now() < floatingTaskPositionIgnoreUntil) return;
+  clearTimeout(floatingTaskDockTimer);
+  floatingTaskDockTimer = setTimeout(dockFloatingTaskIfNearEdge, 260);
+}
+
+function dockFloatingTaskIfNearEdge() {
+  if (!floatingTaskWindow || floatingTaskWindow.isDestroyed()) return;
+  const bounds = floatingTaskWindow.getBounds();
+  const display = screen.getDisplayMatching(bounds);
+  const area = display.workArea;
+  const areaRight = area.x + area.width;
+  const areaBottom = area.y + area.height;
+  const overflows = {
+    left: Math.max(0, area.x - bounds.x),
+    right: Math.max(0, bounds.x + bounds.width - areaRight),
+    top: Math.max(0, area.y - bounds.y),
+    bottom: Math.max(0, bounds.y + bounds.height - areaBottom)
+  };
+  const hiddenEdge = Object.entries(overflows)
+    .filter(([, amount]) => amount > 0)
+    .sort(([, first], [, second]) => second - first)[0];
+
+  if (hiddenEdge) {
+    floatingTaskDockEdge = hiddenEdge[0];
+    floatingTaskDockDisplayId = display.id;
+    setFloatingTaskDockedPosition();
+    sendFloatingTaskUpdate();
+    return;
+  }
+
+  floatingTaskDockEdge = '';
+  floatingTaskDockDisplayId = null;
+  const snapDistance = 24;
+  const leftGap = bounds.x - area.x;
+  const rightGap = areaRight - (bounds.x + bounds.width);
+  const topGap = bounds.y - area.y;
+  const bottomGap = areaBottom - (bounds.y + bounds.height);
+  let x = bounds.x;
+  let y = bounds.y;
+  if (leftGap <= snapDistance) x = area.x;
+  else if (rightGap <= snapDistance) x = areaRight - bounds.width;
+  if (topGap <= snapDistance) y = area.y;
+  else if (bottomGap <= snapDistance) y = areaBottom - bounds.height;
+  if (x !== bounds.x || y !== bounds.y) setFloatingTaskPosition(x, y);
+  sendFloatingTaskUpdate();
+}
+
+function setFloatingTaskDockedPosition() {
+  if (!floatingTaskWindow || floatingTaskWindow.isDestroyed() || !floatingTaskDockEdge) return;
+  const bounds = floatingTaskWindow.getBounds();
+  const display = screen.getAllDisplays().find((item) => item.id === floatingTaskDockDisplayId)
+    || screen.getDisplayMatching(bounds);
+  const area = display.workArea;
+  const tabSize = 18;
+  const next = {
+    x: Math.min(Math.max(bounds.x, area.x), area.x + area.width - bounds.width),
+    y: Math.min(Math.max(bounds.y, area.y), area.y + area.height - bounds.height)
+  };
+  if (floatingTaskDockEdge === 'left') next.x = area.x - bounds.width + tabSize;
+  if (floatingTaskDockEdge === 'right') next.x = area.x + area.width - tabSize;
+  if (floatingTaskDockEdge === 'top') next.y = area.y - bounds.height + tabSize;
+  if (floatingTaskDockEdge === 'bottom') next.y = area.y + area.height - tabSize;
+  setFloatingTaskPosition(next.x, next.y);
+}
+
+function expandFloatingTaskWindow({ preserveDock = false } = {}) {
+  if (!floatingTaskWindow || floatingTaskWindow.isDestroyed() || !floatingTaskDockEdge) return;
+  const bounds = floatingTaskWindow.getBounds();
+  const display = screen.getAllDisplays().find((item) => item.id === floatingTaskDockDisplayId)
+    || screen.getDisplayMatching(bounds);
+  const area = display.workArea;
+  let x = bounds.x;
+  let y = bounds.y;
+  if (floatingTaskDockEdge === 'left') x = area.x;
+  if (floatingTaskDockEdge === 'right') x = area.x + area.width - bounds.width;
+  if (floatingTaskDockEdge === 'top') y = area.y;
+  if (floatingTaskDockEdge === 'bottom') y = area.y + area.height - bounds.height;
+  setFloatingTaskPosition(x, y);
+  if (!preserveDock) {
+    floatingTaskDockEdge = '';
+    floatingTaskDockDisplayId = null;
+  }
+  sendFloatingTaskUpdate();
+}
+
+function setFloatingTaskPosition(x, y) {
+  if (!floatingTaskWindow || floatingTaskWindow.isDestroyed()) return;
+  floatingTaskPositionIgnoreUntil = Date.now() + 600;
+  floatingTaskWindow.setPosition(Math.round(x), Math.round(y));
+}
+
+function sendFloatingTaskUpdate() {
+  if (!floatingTaskWindow || floatingTaskWindow.isDestroyed() || floatingTaskWindow.webContents.isDestroyed()) return;
+  floatingTaskWindow.webContents.send('floating-task:update', {
+    ...(floatingTaskPayload || {}),
+    alwaysOnTop: floatingTaskAlwaysOnTop,
+    docked: Boolean(floatingTaskDockEdge),
+    dockEdge: floatingTaskDockEdge
+  });
+}
+
+function flashFloatingTaskWindow() {
+  if (isQuitting) return;
+  const window = createFloatingTaskWindow();
+  pendingFloatingTaskFlashes += 1;
+  const shouldRedock = Boolean(floatingTaskDockEdge);
+  if (shouldRedock) expandFloatingTaskWindow({ preserveDock: true });
+  window.showInactive();
+  applyFloatingTaskAlwaysOnTop();
+  sendFloatingTaskUpdate();
+  sendPendingFloatingTaskFlashes();
+
+  clearTimeout(floatingTaskFlashTimer);
+  floatingTaskFlashTimer = null;
+  if (shouldRedock) {
+    floatingTaskFlashTimer = setTimeout(() => {
+      floatingTaskFlashTimer = null;
+      setFloatingTaskDockedPosition();
+    }, 6700);
+  }
+}
+
+function sendPendingFloatingTaskFlashes() {
+  if (!floatingTaskWindowReady || !floatingTaskWindow || floatingTaskWindow.isDestroyed() || pendingFloatingTaskFlashes === 0) return;
+  const flashes = pendingFloatingTaskFlashes;
+  pendingFloatingTaskFlashes = 0;
+  floatingTaskWindow.webContents.send('floating-task:flash', { times: flashes * 5 });
 }
 
 function showDesktopReminder(payload = {}) {
@@ -474,6 +701,68 @@ function sendAsrEvent(channel, payload) {
 function isMainWindowSender(event) {
   return Boolean(mainWindow) && !mainWindow.isDestroyed() && event.sender === mainWindow.webContents;
 }
+
+function isFloatingTaskWindowSender(event) {
+  return Boolean(floatingTaskWindow) && !floatingTaskWindow.isDestroyed() && event.sender === floatingTaskWindow.webContents;
+}
+
+ipcMain.on('floating-task:update', (event, payload = {}) => {
+  if (!isMainWindowSender(event)) return;
+  const categoryColor = String(payload.categoryColor || '').trim();
+  floatingTaskPayload = {
+    active: Boolean(payload.active),
+    title: String(payload.title || '').slice(0, 120),
+    timeRange: String(payload.timeRange || '').slice(0, 48),
+    details: String(payload.details || '').slice(0, 300),
+    state: String(payload.state || 'idle').slice(0, 24),
+    stateLabel: String(payload.stateLabel || '').slice(0, 32),
+    countdownLabel: String(payload.countdownLabel || '').slice(0, 32),
+    countdown: String(payload.countdown || '').slice(0, 16),
+    categoryColor: /^#[0-9a-f]{6}$/i.test(categoryColor) ? categoryColor : '#8b98a0'
+  };
+  sendFloatingTaskUpdate();
+});
+
+ipcMain.on('floating-task:open-main', (event) => {
+  if (!isFloatingTaskWindowSender(event)) return;
+  showMainWindow();
+});
+
+ipcMain.on('floating-task:expand', (event) => {
+  if (!isFloatingTaskWindowSender(event)) return;
+  expandFloatingTaskWindow();
+});
+
+ipcMain.on('floating-task:resize', (event, requestedHeight) => {
+  if (!isFloatingTaskWindowSender(event) || !floatingTaskWindow || floatingTaskWindow.isDestroyed()) return;
+  const height = Math.max(124, Math.min(420, Math.round(Number(requestedHeight) || 124)));
+  const bounds = floatingTaskWindow.getBounds();
+  if (bounds.height === height) return;
+  floatingTaskWindow.setSize(bounds.width, height);
+  if (floatingTaskDockEdge && !floatingTaskFlashTimer) {
+    setFloatingTaskDockedPosition();
+    return;
+  }
+  const display = screen.getDisplayMatching(floatingTaskWindow.getBounds());
+  const area = display.workArea;
+  const resizedBounds = floatingTaskWindow.getBounds();
+  setFloatingTaskPosition(
+    Math.min(Math.max(resizedBounds.x, area.x), area.x + area.width - resizedBounds.width),
+    Math.min(Math.max(resizedBounds.y, area.y), area.y + area.height - resizedBounds.height)
+  );
+});
+
+ipcMain.on('floating-task:toggle-topmost', (event) => {
+  if (!isFloatingTaskWindowSender(event)) return;
+  floatingTaskAlwaysOnTop = !floatingTaskAlwaysOnTop;
+  applyFloatingTaskAlwaysOnTop();
+  sendFloatingTaskUpdate();
+});
+
+ipcMain.on('floating-task:flash', (event) => {
+  if (!isMainWindowSender(event)) return;
+  flashFloatingTaskWindow();
+});
 
 function serializeAsrError(error) {
   return {
@@ -1238,7 +1527,10 @@ ipcMain.handle('task:parseText', (event, payload = {}) => {
 
   return {
     ok: true,
-    result: parseTaskTextList(payload.text, { referenceDate: payload.referenceDate })
+    result: parseTaskTextList(payload.text, {
+      referenceDate: payload.referenceDate,
+      taskCategories: Array.isArray(payload.taskCategories) ? payload.taskCategories : []
+    })
   };
 });
 
@@ -1468,11 +1760,6 @@ ipcMain.handle('data:openDirectory', async () => {
 
 ipcMain.handle('data:reset', async (_event, payload = {}) => {
   return resetData(app, payload.data, payload.options);
-});
-
-ipcMain.handle('notify:show', (_event, payload = {}) => {
-  showDesktopReminder(payload);
-  return { ok: true };
 });
 
 async function parseSelectedFile(filePath) {

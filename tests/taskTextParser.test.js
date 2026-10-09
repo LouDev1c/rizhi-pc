@@ -154,4 +154,10 @@ assert.deepEqual(midnightRegression.tasks.map((task) => `${task.startTime}-${tas
 const dailyDuration = (task) => { const start = Number(task.startTime.slice(0, 2)) * 60 + Number(task.startTime.slice(3)); const end = Number(task.endTime.slice(0, 2)) * 60 + Number(task.endTime.slice(3)); return (end <= start ? end + 1440 : end) - start; };
 assert.ok(midnightRegression.tasks.reduce((total, task) => total + dailyDuration(task), 0) <= 1440, '一天内连续任务的总时长不应超过 24 小时。');
 
+const customCategory = parseTaskTextList(
+  '上午九点到十点慢跑，公园五公里，类型：运动。',
+  { referenceDate: '2026-09-18', taskCategories: ['深度工作', '运动'] }
+);
+assert.equal(customCategory.tasks[0].type, '运动');
+
 console.log('taskTextParser tests passed');

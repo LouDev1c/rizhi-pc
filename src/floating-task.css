@@ -1,0 +1,56 @@
+:root {
+  color: #1d2d25;
+  font-family: "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body { width: 100%; min-height: 0; margin: 0; overflow: hidden; }
+
+.task-bubble {
+  --bubble-accent: #2e8f65;
+  --bubble-accent-rgb: 46, 143, 101;
+  --bubble-strong: #276044;
+  --bubble-muted: #526b5d;
+  --bubble-bg-start: #eaf4ef;
+  --bubble-bg-end: #cfe6da;
+  position: relative;
+  width: 252px;
+  min-height: 124px;
+  padding: 11px 13px 9px;
+  border: 1px solid rgba(var(--bubble-accent-rgb), .42);
+  border-radius: 22px;
+  background: linear-gradient(135deg, var(--bubble-bg-start), var(--bubble-bg-end));
+  box-shadow: 0 12px 32px rgba(var(--bubble-accent-rgb), .24), inset 0 1px rgba(255, 255, 255, .8);
+  cursor: grab;
+  user-select: none;
+  -webkit-app-region: drag;
+}
+
+.task-bubble:active { cursor: grabbing; }
+
+.dock-reveal-button { display: none; position: absolute; z-index: 2; padding: 0; border: 0; background: transparent; cursor: pointer; -webkit-app-region: no-drag; }
+.task-bubble.is-docked .dock-reveal-button { display: block; }
+.task-bubble.dock-left .dock-reveal-button { top: 0; bottom: 0; left: 0; width: 18px; }
+.task-bubble.dock-right .dock-reveal-button { top: 0; right: 0; bottom: 0; width: 18px; }
+.task-bubble.dock-top .dock-reveal-button { top: 0; right: 0; left: 0; height: 18px; }
+.task-bubble.dock-bottom .dock-reveal-button { right: 0; bottom: 0; left: 0; height: 18px; }
+
+.bubble-header { display: flex; align-items: center; gap: 6px; color: var(--bubble-strong); font-size: 11px; font-weight: 700; }
+.state-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--bubble-accent); box-shadow: 0 0 0 3px rgba(var(--bubble-accent-rgb), .16); }
+.topmost-button { margin-left: auto; padding: 3px 8px; border: 1px solid rgba(var(--bubble-accent-rgb), .4); border-radius: 999px; background: rgba(255, 255, 255, .5); color: inherit; cursor: pointer; font: inherit; font-size: 11px; -webkit-app-region: no-drag; }
+.topmost-button:hover { background: rgba(255, 255, 255, .82); }
+.topmost-button:not(.is-active) { border-color: rgba(90, 105, 116, .3); color: #65737b; }
+.task-summary { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; height: 43px; margin-top: 6px; gap: 8px; }
+.task-bubble:not(.has-countdown) .task-summary { grid-template-columns: minmax(0, 1fr); }
+.task-bubble:not(.has-countdown) .countdown-row { display: none; }
+h1 { margin: 0 0 2px; overflow: hidden; color: var(--bubble-strong); font-size: 16px; font-weight: 760; line-height: 1.22; text-overflow: ellipsis; white-space: nowrap; }
+.task-time { margin: 0; color: var(--bubble-strong); font-size: 12px; font-variant-numeric: tabular-nums; }
+.countdown-row { display: grid; justify-items: end; color: var(--bubble-strong); font-size: 11px; font-weight: 700; }
+.countdown-row span { margin-bottom: 2px; }
+.countdown-row strong { color: var(--bubble-strong); font-size: 20px; font-variant-numeric: tabular-nums; letter-spacing: .04em; line-height: 1; }
+.task-details { min-height: 30px; margin: 7px 0 0; color: var(--bubble-muted); font-size: 11px; line-height: 15px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.task-bubble.is-break::after { content: ""; position: absolute; z-index: 1; inset: -3px; border: 2px solid rgba(var(--bubble-accent-rgb), .72); border-radius: 25px; box-shadow: 0 0 8px rgba(var(--bubble-accent-rgb), .52), 0 0 18px rgba(var(--bubble-accent-rgb), .3); pointer-events: none; animation: rest-border-glow 1.35s ease-in-out infinite; }
+@keyframes rest-border-glow { 0%, 100% { opacity: .55; box-shadow: 0 0 6px rgba(var(--bubble-accent-rgb), .38), 0 0 13px rgba(var(--bubble-accent-rgb), .2); } 50% { opacity: 1; box-shadow: 0 0 12px rgba(var(--bubble-accent-rgb), .78), 0 0 28px rgba(var(--bubble-accent-rgb), .46); } }
+@keyframes bubble-flash { 0%, 100% { transform: scale(1); filter: brightness(1); } 50% { transform: scale(1.025); filter: brightness(1.13); } }
+.task-bubble.is-flashing { animation: bubble-flash .34s ease-in-out 5; }

@@ -26,7 +26,7 @@ function parseTaskText(text, options = {}) {
   const referenceDate = normalizeReferenceDate(options.referenceDate);
   const dateResult = parseDate(rawText, referenceDate, warnings);
   const timeResult = parseTimeRange(rawText, warnings);
-  const typeResult = parseTaskType(rawText, warnings);
+  const typeResult = parseTaskType(rawText, warnings, options.taskCategories);
   const title = parseTitle(rawText, [
     ...dateResult.spans,
     ...timeResult.spans,
@@ -78,7 +78,7 @@ function parseTaskTextList(text, options = {}) {
     const normalizedRange = alignRangeToSequence(localRange, previousEndMinutes);
     previousEndMinutes = normalizedRange.endMinutes;
     const warnings = [...range.warnings, ...normalizedRange.warnings];
-    const typeResult = parseTaskType(segmentText, warnings);
+    const typeResult = parseTaskType(segmentText, warnings, options.taskCategories);
     const content = parseSegmentContent(segmentText, typeResult.spans);
     const task = {
       date: resolvedDate,
@@ -426,7 +426,18 @@ function parseClock(rawClock, inheritedPeriod = '') {
   return { time: `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`, period };
 }
 
-function parseTaskType(text, warnings) {
+function parseTaskType(text, warnings, taskCategories = []) {
+  const customNames = Array.from(new Set((Array.isArray(taskCategories) ? taskCategories : [])
+    .map((name) => String(name || '').trim())
+    .filter(Boolean)))
+    .sort((a, b) => b.length - a.length);
+  for (const name of customNames) {
+    const escapedName = escapeRegExp(name);
+    const pattern = new RegExp(`(?:分类|类型|属于|作为|安排为)[：:\\s]*${escapedName}(?:任务|安排|事项)?|${escapedName}(?:任务|安排|事项)`);
+    const match = text.match(pattern);
+    if (match) return { value: name, spans: [spanFromMatch(match)] };
+  }
+
   const explicitPatterns = [
     /(?:算|是|属于|作为|安排为)\s*(工作|课程|学习|生活)(?:任务|安排|事项)?/,
     /(工作|课程|学习|生活)(?:任务|安排|事项)/
@@ -446,6 +457,10 @@ function parseTaskType(text, warnings) {
   if (matches.length === 1) return { value: matches[0].type, spans: [] };
   if (matches.length > 1) warnings.push('检测到多个类型关键词，未自动推断任务类型。');
   return { value: '', spans: [] };
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function parseTitle(text, spans) {

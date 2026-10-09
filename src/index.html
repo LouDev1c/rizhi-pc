@@ -27,9 +27,9 @@
             <span class="nav-icon">◇</span>
             <span>记录</span>
           </button>
-          <button class="nav-item" data-page="profile" title="个人">
+          <button class="nav-item" data-page="profile" title="统计">
             <span class="nav-icon">○</span>
-            <span>个人</span>
+            <span>统计</span>
           </button>
           <button class="nav-item" data-page="settings" title="设置">
             <span class="nav-icon">△</span>
@@ -96,12 +96,12 @@
             <section class="panel">
               <div class="section-head profile-stats-head">
                 <div>
-                  <h2>自律统计</h2>
-                  <p class="muted">根据安排、评价和不同任务类型的投入时间观察近期节奏。</p>
+                  <h2>周期回顾</h2>
+                  <p class="muted">查看任务完成情况和不同任务分类的计划时间分配。</p>
                 </div>
                 <div class="profile-period-controls">
                   <label class="date-picker">
-                    <span>起始日期</span>
+                    <span>参考日期</span>
                     <div class="date-stepper">
                       <input id="profileStatsStartDate" type="date" />
                       <div class="date-stepper-buttons" aria-hidden="false">
@@ -124,16 +124,18 @@
               </div>
 
               <div id="profileStatsSummary" class="stats-summary-grid"></div>
-              <div class="stats-visual-panel">
+
+              <section class="stats-review-section">
                 <div class="stats-visual-head">
-                  <h3>平均每日各类任务时长</h3>
+                  <h3>计划时间分配</h3>
                   <span id="profileStatsRangeText" class="muted"></span>
                 </div>
-                <div class="stats-visual-content">
-                  <div id="profileStatsPie" class="stats-pie-wrap"></div>
-                  <div id="profileStatsBars" class="stats-bars"></div>
+                <div class="stats-allocation-layout">
+                  <div id="profileStatsPie" class="stats-pie-summary"></div>
+                  <div id="profileStatsDaily" class="stats-daily-list"></div>
                 </div>
-              </div>
+              </section>
+
             </section>
           </div>
         </section>
@@ -148,10 +150,10 @@
                 </div>
                 <div class="journal-editor-controls">
                   <label class="date-picker tag-picker">
-                    <span>标签</span>
+                    <span>日子印记</span>
                     <div class="tag-select-control">
-                      <select id="journalTag" class="sr-only-select" aria-label="标签"></select>
-                      <button id="journalTagPaletteButton" class="tag-palette-button empty" type="button" aria-label="选择标签"></button>
+                      <select id="journalTag" class="sr-only-select" aria-label="日子印记" multiple></select>
+                      <button id="journalTagPaletteButton" class="tag-palette-button empty" type="button" aria-label="选择日子印记" aria-expanded="false"></button>
                       <div id="journalTagPalette" class="tag-palette hidden"></div>
                     </div>
                   </label>
@@ -197,7 +199,11 @@
                 </div>
                 <div class="record-filter">
                   <button id="backToJournalEditorButton" class="secondary-button" type="button">返回填写</button>
-                  <button id="journalFilterModeButton" class="secondary-button filter-mode-button" type="button">显示全部</button>
+                  <div class="record-filter-modes" role="group" aria-label="记录筛选方式">
+                    <button class="record-filter-mode-button active" type="button" data-journal-filter-mode="all" aria-pressed="true">全部</button>
+                    <button class="record-filter-mode-button" type="button" data-journal-filter-mode="date" aria-pressed="false">日期</button>
+                    <button class="record-filter-mode-button" type="button" data-journal-filter-mode="tag" aria-pressed="false">标签</button>
+                  </div>
                   <label id="journalViewDateField" class="date-picker hidden">
                     <span>日期</span>
                     <div class="date-stepper">
@@ -209,10 +215,10 @@
                     </div>
                   </label>
                   <label id="journalTagFilterField" class="date-picker tag-picker hidden">
-                    <span>标签</span>
+                    <span>标签筛选</span>
                     <div class="tag-select-control">
-                      <select id="journalTagFilter" class="sr-only-select" aria-label="筛选标签"></select>
-                      <button id="journalTagFilterPaletteButton" class="tag-palette-button empty" type="button" aria-label="选择筛选标签"></button>
+                      <select id="journalTagFilter" class="sr-only-select" aria-label="筛选标签" multiple></select>
+                      <button id="journalTagFilterPaletteButton" class="tag-palette-button empty" type="button" aria-label="选择一个或多个筛选标签" aria-expanded="false"></button>
                       <div id="journalTagFilterPalette" class="tag-palette hidden"></div>
                     </div>
                   </label>
@@ -231,8 +237,8 @@
               <div class="settings-menu">
                 <button class="settings-menu-item" type="button" data-settings-panel="data">数据文件</button>
                 <button class="settings-menu-item" type="button" data-settings-panel="danger">数据删除</button>
+                <button class="settings-menu-item" type="button" data-settings-panel="task-categories">任务分类</button>
                 <button class="settings-menu-item" type="button" data-settings-panel="tags">标签</button>
-                <button class="settings-menu-item" type="button" data-settings-panel="reminders">周期设置</button>
                 <button class="settings-menu-item" type="button" data-settings-panel="asr-test">语音识别测试</button>
               </div>
             </aside>
@@ -330,48 +336,21 @@
                 </div>
               </section>
 
-              <section class="panel settings-tags-panel hidden" data-settings-panel="tags">
-                <h2>标签</h2>
-                <p class="muted">用纯色块给每日生活记录分类。简称用于列表和下拉选择，全称用于说明这个标签代表的日子含义。</p>
-                <div id="journalTagSettingsList" class="tag-settings-list"></div>
-                <button id="addJournalTagButton" class="secondary-button" type="button">新增标签</button>
+              <section class="panel settings-task-categories-panel hidden" data-settings-panel="task-categories">
+                <h2>任务分类</h2>
+                <p class="muted">分类可自定义名称与颜色，并独立设置专注和休息周期。停用后不再用于新任务，已有任务和统计仍会保留。</p>
+                <div id="taskCategorySettingsList" class="task-category-settings-list"></div>
+                <div class="task-category-settings-footer">
+                  <button id="addTaskCategoryButton" class="secondary-button" type="button">新增分类</button>
+                  <p id="taskCategorySettingsStatus" class="form-feedback hidden" role="status"></p>
+                </div>
               </section>
 
-              <section class="panel settings-reminder-panel hidden" data-settings-panel="reminders">
-                <h2>周期设置</h2>
-                <div class="reminder-rule-section">
-                  <h3>课程提醒时间</h3>
-                  <p class="muted">只用于标签为“课程”的任务，用来计算上课、下课和课间提醒。</p>
-                  <div class="profile-settings-grid">
-                    <label class="field">
-                      <span>每节课程时间</span>
-                      <input id="classDuration" type="number" min="10" step="5" value="50" />
-                    </label>
-                    <label class="field">
-                      <span>课间时间</span>
-                      <input id="classBreakLength" type="number" min="1" step="1" value="10" />
-                    </label>
-                  </div>
-                </div>
-
-                <div class="reminder-rule-section">
-                  <h3>工作/学习提醒时间</h3>
-                  <p class="muted">只用于标签为“工作”和“学习”的任务，用来计算专注和休息提醒。</p>
-                  <div class="profile-settings-grid">
-                    <label class="field">
-                      <span>一次专注时长</span>
-                      <input id="workFocusLength" type="number" min="10" step="5" value="50" />
-                    </label>
-                    <label class="field">
-                      <span>休息时长</span>
-                      <input id="workBreakLength" type="number" min="1" step="1" value="10" />
-                    </label>
-                  </div>
-                  <label class="toggle-row">
-                    <input id="breakReminder" type="checkbox" checked />
-                    <span>长时间工作或学习后提醒活动身体、远眺放松</span>
-                  </label>
-                </div>
+              <section class="panel settings-tags-panel hidden" data-settings-panel="tags">
+                <h2>标签</h2>
+                <p class="muted">自定义日子印记的名称和颜色。一天可以选择多个标签，也可以不设置；筛选多个标签时会显示同时包含这些标签的记录。</p>
+                <div id="journalTagSettingsList" class="tag-settings-list"></div>
+                <button id="addJournalTagButton" class="secondary-button" type="button">新增标签</button>
               </section>
 
               <section class="panel settings-asr-test-panel hidden" data-settings-panel="asr-test">
@@ -476,26 +455,16 @@
       <div class="modal-card">
         <div class="modal-header">
           <div>
-            <p class="eyebrow">完成记录</p>
-            <h2 id="taskEditTitle">填写详情</h2>
+            <p class="eyebrow">可选内容</p>
+            <h2 id="taskEditTitle">任务备注</h2>
           </div>
           <button id="closeTaskEditModalButton" class="icon-button" aria-label="关闭">×</button>
         </div>
 
         <form id="taskEditForm" class="manual-form">
           <label class="field">
-            <span>实际完成与反思</span>
-            <textarea id="taskDetails" class="detail-textarea" placeholder="记录实际完成了哪些具体任务、遇到的问题、复盘和反思。"></textarea>
-          </label>
-
-          <label class="field">
-            <span>完成情况</span>
-            <select id="taskStatus">
-              <option value="未评价">未评价</option>
-              <option value="已完成">已完成</option>
-              <option value="部分完成">部分完成</option>
-              <option value="未完成">未完成</option>
-            </select>
+            <span>备注（选填）</span>
+            <textarea id="taskDetails" class="detail-textarea" placeholder="只在有偏差、结果或值得保留的内容时填写。当天的整体复盘请写在每日生活记录中。"></textarea>
           </label>
 
           <div class="modal-actions">
@@ -528,7 +497,7 @@
 
           <section class="import-choice-card">
             <h3>每日安排</h3>
-            <p class="muted">适合某一天或一段日期内的工作、学习、生活规划。</p>
+            <p class="muted">适合某一天或一段日期内的日常任务规划。</p>
             <div class="import-choice-actions">
               <button id="reuseTemplateButton" class="secondary-button" type="button">复用模板</button>
               <button id="manualDailyPlanButton" class="primary-button" type="button">填写安排内容</button>
@@ -690,7 +659,7 @@
                 <th>时间段</th>
                 <th>任务</th>
                 <th>具体内容</th>
-                <th>标签</th>
+                <th>分类</th>
                 <th class="row-action-heading" aria-label="操作"></th>
               </tr>
             </thead>
@@ -829,7 +798,7 @@
           <button id="tutorialConfirmNoButton" class="icon-button" aria-label="关闭">×</button>
         </div>
 
-        <p class="muted">教程会依次介绍任务创建与模板、生活记录、语音输入、照片和视频归档、记录筛选、自律统计、数据管理、标签、周期提醒和定位按钮。</p>
+        <p class="muted">教程会依次介绍任务创建与模板、完成情况与备注、生活记录、语音输入、照片和视频归档、记录筛选、周期回顾、数据管理、任务分类、标签和定位按钮。教程过程中可以随时退出。</p>
 
         <div class="modal-actions">
           <button id="tutorialNoButton" class="secondary-button" type="button">否</button>
@@ -854,9 +823,9 @@
         <h2 id="tutorialTitle"></h2>
         <p id="tutorialText"></p>
         <div class="tutorial-actions">
+          <button id="tutorialCloseButton" class="secondary-button tutorial-exit-button" type="button">退出教程</button>
           <button id="tutorialPrevButton" class="secondary-button" type="button">上一步</button>
           <button id="tutorialNextButton" class="primary-button" type="button">下一步</button>
-          <button id="tutorialCloseButton" class="primary-button hidden" type="button">关闭</button>
         </div>
       </section>
     </div>
@@ -864,6 +833,7 @@
     <script src="./shared/dateUtils.js"></script>
     <script src="./shared/taskTimeUtils.js"></script>
     <script src="./shared/journalTags.js"></script>
+    <script src="./shared/taskCategories.js"></script>
     <script src="./asr/audioCapture.js"></script>
     <script src="./renderer.js"></script>
   </body>

@@ -11,7 +11,8 @@ contextBridge.exposeInMainWorld('whbr', {
   getAppIconUrl: () => ipcRenderer.invoke('app:getIconUrl'),
   getAppVersion: () => ipcRenderer.invoke('app:getVersion'),
   getSystemTime: () => ipcRenderer.invoke('system:getTime'),
-  parseTaskText: (text, referenceDate) => ipcRenderer.invoke('task:parseText', { text, referenceDate }),
+  updateFloatingTask: (payload) => ipcRenderer.send('floating-task:update', payload),
+  parseTaskText: (text, referenceDate, taskCategories = []) => ipcRenderer.invoke('task:parseText', { text, referenceDate, taskCategories }),
   showMessageBox: (options) => ipcRenderer.invoke('dialog:messageBox', options),
   selectAndParseFile: (options) => ipcRenderer.invoke('file:selectAndParse', options),
   parseFilePath: (filePath) => ipcRenderer.invoke('file:parsePath', filePath),
@@ -36,7 +37,7 @@ contextBridge.exposeInMainWorld('whbr', {
   },
   onHistoryUndo: (listener) => subscribeToAsrEvent('history:undo', listener),
   onHistoryRedo: (listener) => subscribeToAsrEvent('history:redo', listener),
-  showReminder: (payload) => ipcRenderer.invoke('notify:show', payload),
+  flashFloatingTask: () => ipcRenderer.send('floating-task:flash'),
   asr: {
     getModelStatus: () => ipcRenderer.invoke('asr:modelStatus'),
     downloadModel: () => ipcRenderer.invoke('asr:downloadModel'),

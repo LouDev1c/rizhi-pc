@@ -9,8 +9,7 @@ const pages = {
   records: document.querySelector('#recordsPage'),
   settings: document.querySelector('#settingsPage')
 };
-const TASK_TYPES = ['工作', '课程', '学习', '生活'];
-const TASK_SUMMARY_TYPES = [...TASK_TYPES, '未分配'];
+const UNASSIGNED_CATEGORY_ID = 'category-unassigned';
 const MICROPHONE_TEST_SAMPLE_RATE = 48000;
 const {
   MIN_DATE_VALUE,
@@ -40,8 +39,15 @@ const {
 } = globalThis.RizhiTaskTimeUtils;
 const {
   DEFAULT_JOURNAL_TAGS,
-  legacyRatingToTagId
+  legacyRatingToTagId,
+  normalizeJournalTagIds: normalizeRawJournalTagIds
 } = globalThis.RizhiJournalTags;
+const {
+  cloneDefaultTaskCategories,
+  legacyTaskTypeToCategoryId,
+  normalizeTaskCategories: normalizeRawTaskCategories,
+  resolveTaskCategoryId
+} = globalThis.RizhiTaskCategories;
 const emptyState = document.querySelector('#emptyState');
 const taskWorkspace = document.querySelector('#taskWorkspace');
 const taskList = document.querySelector('#taskList');
@@ -79,7 +85,7 @@ const journalVoiceStartButton = document.querySelector('#journalVoiceStartButton
 const journalVoiceCancelButton = document.querySelector('#journalVoiceCancelButton');
 const journalVoiceTimer = document.querySelector('#journalVoiceTimer');
 const journalVoiceStatus = document.querySelector('#journalVoiceStatus');
-const journalFilterModeButton = document.querySelector('#journalFilterModeButton');
+const journalFilterModeButtons = Array.from(document.querySelectorAll('[data-journal-filter-mode]'));
 const journalSearchInput = document.querySelector('#journalSearchInput');
 const journalTagFilter = document.querySelector('#journalTagFilter');
 const journalTagFilterPaletteButton = document.querySelector('#journalTagFilterPaletteButton');
@@ -122,6 +128,9 @@ const asrInputWaveform = document.querySelector('#asrInputWaveform');
 const asrInputFeedback = document.querySelector('#asrInputFeedback');
 const journalTagSettingsList = document.querySelector('#journalTagSettingsList');
 const addJournalTagButton = document.querySelector('#addJournalTagButton');
+const taskCategorySettingsList = document.querySelector('#taskCategorySettingsList');
+const addTaskCategoryButton = document.querySelector('#addTaskCategoryButton');
+const taskCategorySettingsStatus = document.querySelector('#taskCategorySettingsStatus');
 const deleteMultipleDates = document.querySelector('#deleteMultipleDates');
 const deleteStartDate = document.querySelector('#deleteStartDate');
 const deleteStartDateLabel = document.querySelector('#deleteStartDateLabel');
@@ -145,13 +154,12 @@ const taskEditTitle = document.querySelector('#taskEditTitle');
 const closeTaskEditModalButton = document.querySelector('#closeTaskEditModalButton');
 const cancelTaskEditButton = document.querySelector('#cancelTaskEditButton');
 const taskDetails = document.querySelector('#taskDetails');
-const taskStatus = document.querySelector('#taskStatus');
 const profileStatsStartDate = document.querySelector('#profileStatsStartDate');
 const profileStatsPeriod = document.querySelector('#profileStatsPeriod');
 const profileStatsSummary = document.querySelector('#profileStatsSummary');
 const profileStatsRangeText = document.querySelector('#profileStatsRangeText');
 const profileStatsPie = document.querySelector('#profileStatsPie');
-const profileStatsBars = document.querySelector('#profileStatsBars');
+const profileStatsDaily = document.querySelector('#profileStatsDaily');
 const importChoiceModal = document.querySelector('#importChoiceModal');
 const closeImportChoiceModalButton = document.querySelector('#closeImportChoiceModalButton');
 const manualScheduleButton = document.querySelector('#manualScheduleButton');
@@ -212,11 +220,6 @@ const closeJournalUnsavedModalButton = document.querySelector('#closeJournalUnsa
 const discardJournalChangesButton = document.querySelector('#discardJournalChangesButton');
 const cancelJournalNavigationButton = document.querySelector('#cancelJournalNavigationButton');
 const saveJournalBeforeLeaveButton = document.querySelector('#saveJournalBeforeLeaveButton');
-const classDuration = document.querySelector('#classDuration');
-const classBreakLength = document.querySelector('#classBreakLength');
-const workFocusLength = document.querySelector('#workFocusLength');
-const workBreakLength = document.querySelector('#workBreakLength');
-const breakReminder = document.querySelector('#breakReminder');
 const tutorialButton = document.querySelector('#tutorialButton');
 const refreshStatusButton = document.querySelector('#refreshStatusButton');
 const tutorialConfirmModal = document.querySelector('#tutorialConfirmModal');
@@ -251,15 +254,18 @@ let draggedTaskId = '';
 let deleteMode = 'all';
 let selectedTaskTemplateId = '';
 let expandedTaskTemplateId = '';
+let pendingTaskCategoryDeleteId = '';
+const taskCategoryColorSaveTimers = new Map();
 let activeMediaAnnotationEditor = null;
 let highlightedTaskId = '';
 let currentEffectiveNow = new Date();
-let lastReminderCheckValue = null;
+let previousFloatingTaskStateKey = '';
+let floatingTaskStateInitialized = false;
 let statusTimer = null;
 let tutorialStepIndex = 0;
 let appStatusRefreshInFlight = false;
 let previousTutorialPage = 'tasks';
-let appliedJournalTagFilter = '';
+let appliedJournalTagFilters = [];
 let appliedJournalSearch = '';
 let journalFilterMode = 'all';
 let recordsView = 'editor';
@@ -318,7 +324,6 @@ let dailyPlanVoiceDecodedSeconds = 0;
 let dailyPlanVoiceDecodeRealtimeFactor = 0;
 let dailyPlanVoiceParsedCandidates = [];
 let dailyPlanVoiceParsedText = '';
-const firedReminderKeys = new Set();
 const activePlanningDates = new Set();
 const dateInputControllers = new WeakMap();
 const taskUndoStack = [];
@@ -336,14 +341,20 @@ const tutorialSteps = [
     page: 'tasks',
     targetSelector: '#saveTaskTemplateButton',
     title: '保存安排模板',
-    text: '将当前日期的完整安排保存为模板后，可以在“批量创建任务”中复用。模板只保存时间段、任务名称和任务标签，不会带入完成记录。'
+    text: '将当前日期的完整安排保存为模板后，可以在“批量创建任务”中复用。模板只保存时间段、任务名称和任务分类，不会带入完成记录。'
+  },
+  {
+    page: 'tasks',
+    targetSelector: '#taskList',
+    title: '完成情况与备注',
+    text: '每个任务条右侧可以选择完成情况；铅笔按钮用于填写可选备注。日常只需确认状态，只有出现偏差或值得保留的结果时再补充备注。'
   },
   {
     page: 'records',
     recordsView: 'editor',
     targetSelector: '.journal-editor',
     title: '每日生活记录',
-    text: '选择日期和标签后，可以写下当天发生的事、状态与复盘内容。切换日期或离开记录页时，如果内容尚未保存，软件会先询问如何处理。'
+    text: '选择日期后，可以写下当天发生的事、状态与整体复盘，并按需添加一个或多个日子印记。切换日期或离开记录页时，如果内容尚未保存，软件会先询问如何处理。'
   },
   {
     page: 'records',
@@ -369,16 +380,16 @@ const tutorialSteps = [
   {
     page: 'records',
     recordsView: 'list',
-    targetSelector: '#journalFilterModeButton',
+    targetSelector: '.record-filter-modes',
     title: '记录列表',
-    text: '筛选按钮可切换“显示全部”“日期记录”和“标签记录”，左侧搜索框还能检索记录文字。点击记录条可查看生活记录、任务完成情况以及当天归档的附件。'
+    text: '可以直接选择“全部”“日期”或“标签”筛选。标签支持多选，结果会同时满足所有已选标签；左侧搜索框还可以和筛选条件组合使用。'
   },
   {
     page: 'profile',
     targetSelector: '.profile-dashboard .panel',
     scrollBlock: 'start',
-    title: '自律统计',
-    text: '这里可以按本日、本周、本月、本季度和本年查看任务安排、完成评价和各类投入时间。'
+    title: '周期回顾',
+    text: '这里按自然日、周、月、季度和年度查看任务状态与计划时间分配。饼状图展示类型占比，右侧条形图展示每日分布。'
   },
   {
     page: 'settings',
@@ -396,17 +407,17 @@ const tutorialSteps = [
   },
   {
     page: 'settings',
-    settingPanel: 'tags',
-    targetSelector: '.settings-tags-panel',
-    title: '标签',
-    text: '标签用纯色块标记每日记录。可以新增、删除和调整颜色，并用简称与全称说明每种日子的含义。'
+    settingPanel: 'task-categories',
+    targetSelector: '.settings-task-categories-panel',
+    title: '任务分类',
+    text: '任务分类可以自行增减、改名、换色和排序。每个分类可单独决定是否启用专注与休息周期，并设置分钟数；停用分类不会影响历史任务。'
   },
   {
     page: 'settings',
-    settingPanel: 'reminders',
-    targetSelector: '.settings-reminder-panel',
-    title: '周期设置',
-    text: '课程、工作和学习的提醒周期在这里调整，日织会按这些信息提醒你专注、休息或活动身体。'
+    settingPanel: 'tags',
+    targetSelector: '.settings-tags-panel',
+    title: '标签',
+    text: '标签作为可选的日子印记使用。可以自定义名称与颜色，一天允许选择多个标签，也可以不设置。'
   },
   {
     page: 'settings',
@@ -595,14 +606,16 @@ if (journalTagFilter) {
   journalTagFilter.addEventListener('change', () => {
     renderTagPicker(journalTagFilter, journalTagFilterPaletteButton, journalTagFilterPalette);
     if (journalFilterMode === 'tag') {
-      appliedJournalTagFilter = normalizeJournalTagId(journalTagFilter.value);
+      appliedJournalTagFilters = selectedJournalTagIds(journalTagFilter);
       renderJournalListPreservingScroll();
     }
   });
 }
 if (journalTagPaletteButton) journalTagPaletteButton.addEventListener('click', () => toggleTagPalette(journalTagPalette));
 if (journalTagFilterPaletteButton) journalTagFilterPaletteButton.addEventListener('click', () => toggleTagPalette(journalTagFilterPalette));
-if (journalFilterModeButton) journalFilterModeButton.addEventListener('click', cycleJournalFilterMode);
+journalFilterModeButtons.forEach((button) => {
+  button.addEventListener('click', () => setJournalFilterMode(button.dataset.journalFilterMode));
+});
 if (journalSearchInput) {
   journalSearchInput.addEventListener('blur', commitJournalSearch);
   journalSearchInput.addEventListener('keydown', (event) => {
@@ -633,6 +646,7 @@ if (openMediaDirectoryButton) openMediaDirectoryButton.addEventListener('click',
 if (openSettingsPathButton) openSettingsPathButton.addEventListener('click', openDataPath);
 if (openModelDirectoryButton) openModelDirectoryButton.addEventListener('click', openModelDirectory);
 if (addJournalTagButton) addJournalTagButton.addEventListener('click', addJournalTag);
+if (addTaskCategoryButton) addTaskCategoryButton.addEventListener('click', addTaskCategory);
 openDeletePeriodButton.addEventListener('click', openDeletePeriodModal);
 if (deleteMultipleDates) deleteMultipleDates.addEventListener('change', updateDeletePeriodFields);
 openResetButton.addEventListener('click', openResetModal);
@@ -731,10 +745,6 @@ if (window.whbr && window.whbr.media) {
   window.whbr.media.onNetworkEvent(handleMediaNetworkEvent);
   window.whbr.media.onSessionExpired(handleMediaUploadExpired);
 }
-[classDuration, classBreakLength, workFocusLength, workBreakLength, breakReminder].forEach((input) => {
-  input.addEventListener('change', saveProfileFromForm);
-});
-
 function getSelectedAudioInputDeviceId() {
   return asrInputDeviceSelect ? asrInputDeviceSelect.value : '';
 }
@@ -1791,7 +1801,107 @@ async function refreshSystemTime() {
   updateTaskDateAfterMidnight(previousDate, today);
   updateTaskTemporalView();
   if (pages.profile.classList.contains('active')) renderProfileStats();
-  checkDueReminders(now);
+  publishFloatingTask(now);
+}
+
+function publishFloatingTask(now = currentEffectiveNow || new Date()) {
+  if (!window.whbr || typeof window.whbr.updateFloatingTask !== 'function') return;
+  const activeTask = findFloatingTask(now);
+  const status = activeTask ? floatingTaskStatus(activeTask, now) : null;
+  const stateKey = activeTask ? `${activeTask.id}|${status.state}` : 'idle';
+  const shouldFlash = floatingTaskStateInitialized && stateKey !== previousFloatingTaskStateKey;
+  previousFloatingTaskStateKey = stateKey;
+  floatingTaskStateInitialized = true;
+
+  window.whbr.updateFloatingTask(activeTask ? {
+    active: true,
+    title: clean(activeTask.title) || '未命名任务',
+    timeRange: `${normalizeTime(activeTask.startTime)} - ${normalizeTime(activeTask.endTime)}`,
+    details: clean(activeTask.planDetails) || clean(activeTask.details) || '暂未填写事前计划或备注',
+    ...status
+  } : {
+    active: false,
+    state: 'idle',
+    stateLabel: '当前暂无任务',
+    title: '暂无进行中的任务',
+    timeRange: '等待下一项安排',
+    countdownLabel: '等待下一项',
+    countdown: '--:--',
+    details: '最小化时会自动显示当前进行的任务。'
+  });
+
+  if (shouldFlash && typeof window.whbr.flashFloatingTask === 'function') {
+    window.whbr.flashFloatingTask();
+  }
+}
+
+function findFloatingTask(now) {
+  const today = formatLocalDate(now);
+  const previousDate = shiftDate(today, -1);
+  const currentMinute = now.getHours() * 60 + now.getMinutes();
+  return sortTasksForDisplay(tasks.filter((task) => {
+    if (!isRenderableTask(task)) return false;
+    const taskDate = normalizeDate(task.date);
+    const start = timeToMinutes(task.startTime);
+    const end = timeToMinutes(task.endTime);
+    if (start === null || end === null) return false;
+    if (isAllDayRange(task.startTime, task.endTime)) return taskDate === today;
+    if (start === end) return false;
+    if (taskDate === today) return classifyTaskStage(task, now) === 'current';
+    return taskDate === previousDate && end < start && currentMinute < end;
+  }))[0] || null;
+}
+
+function floatingTaskStatus(task, now) {
+  const category = taskCategoryForTask(task);
+  const categoryName = category ? category.name : '任务';
+  const categoryColor = category ? category.color : '#8b96a3';
+  const remainingSeconds = floatingTaskRemainingSeconds(task, now);
+  if (!category || !category.cycleEnabled) {
+    const isLifeCategory = category && (category.id === 'category-life' || category.name === '生活');
+    return {
+      state: 'focus',
+      stateLabel: `${categoryName}进行中`,
+      countdownLabel: isLifeCategory ? '' : '任务剩余',
+      countdown: isLifeCategory ? '' : formatCountdown(remainingSeconds),
+      categoryColor
+    };
+  }
+
+  const focusSeconds = numericSetting(category.focusMinutes, 50) * 60;
+  const breakSeconds = numericSetting(category.breakMinutes, 10) * 60;
+  const elapsedSeconds = floatingTaskElapsedSeconds(task, now);
+  const cycleSeconds = focusSeconds + breakSeconds;
+  const phaseSeconds = cycleSeconds > 0 ? elapsedSeconds % cycleSeconds : 0;
+  const inBreak = phaseSeconds >= focusSeconds;
+  const secondsUntilSwitch = inBreak ? cycleSeconds - phaseSeconds : focusSeconds - phaseSeconds;
+  return {
+    state: inBreak ? 'break' : 'focus',
+    stateLabel: inBreak ? '休息中' : `${categoryName}中`,
+    countdownLabel: inBreak ? '休息剩余' : '专注剩余',
+    countdown: formatCountdown(Math.min(remainingSeconds, secondsUntilSwitch)),
+    categoryColor
+  };
+}
+
+function floatingTaskElapsedSeconds(task, now) {
+  const date = parseLocalDate(normalizeDate(task.date));
+  const start = timeToMinutes(task.startTime);
+  if (!date || start === null) return 0;
+  const startAt = new Date(date.getFullYear(), date.getMonth(), date.getDate(), Math.floor(start / 60), start % 60).getTime();
+  return Math.max(0, Math.floor((now.getTime() - startAt) / 1000));
+}
+
+function floatingTaskRemainingSeconds(task, now) {
+  const duration = taskDurationMinutes(task);
+  return Math.max(0, duration * 60 - floatingTaskElapsedSeconds(task, now));
+}
+
+function formatCountdown(totalSeconds) {
+  const safeSeconds = Math.max(0, Math.ceil(Number(totalSeconds) || 0));
+  const minutes = Math.floor(safeSeconds / 60);
+  const seconds = safeSeconds % 60;
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
 function updateTaskDateAfterMidnight(previousDate, today) {
@@ -1846,7 +1956,11 @@ async function showTutorialStep() {
   tutorialPrevButton.disabled = tutorialStepIndex === 0;
   tutorialPrevButton.classList.toggle('hidden', tutorialStepIndex === tutorialSteps.length - 1);
   tutorialNextButton.classList.toggle('hidden', tutorialStepIndex === tutorialSteps.length - 1);
-  tutorialCloseButton.classList.toggle('hidden', tutorialStepIndex !== tutorialSteps.length - 1);
+  const isFinalStep = tutorialStepIndex === tutorialSteps.length - 1;
+  tutorialCloseButton.textContent = isFinalStep ? '完成' : '退出教程';
+  tutorialCloseButton.classList.toggle('primary-button', isFinalStep);
+  tutorialCloseButton.classList.toggle('secondary-button', !isFinalStep);
+  tutorialCloseButton.classList.toggle('is-final', isFinalStep);
 
   positionTutorialOverlay();
 }
@@ -1865,8 +1979,9 @@ async function showNextTutorialStep() {
 
 function finishTutorial() {
   tutorialOverlay.classList.add('hidden');
-  showPage('tasks');
-  renderTasks({ scrollToCurrent: true, forceScroll: true });
+  const returnPage = pages[previousTutorialPage] ? previousTutorialPage : 'tasks';
+  showPage(returnPage);
+  if (returnPage === 'tasks') renderTasks({ scrollToCurrent: true, forceScroll: true });
 }
 
 function scrollTutorialTargetIntoView(step) {
@@ -2183,7 +2298,7 @@ function openImportChoiceModal() {
 function hasScheduleTemplate() {
   const template = normalizedProfile().scheduleTemplate;
   if (template && Array.isArray(template.rows) && template.rows.length > 0) return true;
-  return tasks.some((task) => task.type === '课程' && task.source === 'schedule-template');
+  return tasks.some((task) => task.source === 'schedule-template');
 }
 
 function closeImportChoiceModal() {
@@ -2313,6 +2428,7 @@ function readScheduleTemplateFromTable() {
 
 function buildTasksFromScheduleTemplate(template, dates) {
   const newTasks = [];
+  const category = courseTaskCategory();
 
   template.rows.forEach((row, rowIndex) => {
     const timeRange = extractTimeRangeFromInput(row.timeRange);
@@ -2330,7 +2446,8 @@ function buildTasksFromScheduleTemplate(template, dates) {
         date,
         weekday: weekdayFromDate(date),
         location: '',
-        type: '课程',
+        typeId: category ? category.id : '',
+        type: category ? category.name : '',
         planDetails: '',
         details: '',
         status: '未评价',
@@ -2773,7 +2890,11 @@ async function confirmDailyPlanVoiceText() {
       if (!window.whbr || typeof window.whbr.parseTaskText !== 'function') {
         throw new Error('本地任务解析器不可用，请重新启动应用。');
       }
-      const response = await window.whbr.parseTaskText(text, getDailyPlanVoiceReferenceDate());
+      const response = await window.whbr.parseTaskText(
+        text,
+        getDailyPlanVoiceReferenceDate(),
+        taskCategories().map((category) => category.name)
+      );
       if (!response || !response.ok || !response.result) {
         throw new Error(response && response.error && response.error.message ? response.error.message : '本地任务解析失败。');
       }
@@ -2825,12 +2946,14 @@ function getDailyPlanVoiceReferenceDate() {
 }
 
 function normalizeDailyPlanVoiceCandidate(task = {}) {
+  const category = taskCategoryFromInput(task.typeId || task.type);
   return {
     startTime: clean(task.startTime),
     endTime: clean(task.endTime),
     title: clean(task.title),
     details: clean(task.details),
-    type: TASK_TYPES.includes(clean(task.type)) ? clean(task.type) : ''
+    typeId: category ? category.id : '',
+    type: category ? category.name : ''
   };
 }
 
@@ -2873,7 +2996,7 @@ function requiredDailyPlanVoiceCandidateFields(candidate) {
   if (!candidate.startTime) missing.push('startTime');
   if (!candidate.endTime) missing.push('endTime');
   if (!candidate.title) missing.push('title');
-  if (!TASK_TYPES.includes(candidate.type)) missing.push('type');
+  if (!taskCategoryFromInput(candidate.typeId || candidate.type)) missing.push('type');
   const range = extractTimeRangeFromInput(`${candidate.startTime}-${candidate.endTime}`);
   if (candidate.startTime && candidate.endTime && !range) missing.push('startTime', 'endTime');
   return Array.from(new Set(missing));
@@ -2929,6 +3052,7 @@ function applyDailyPlanVoiceTasks() {
     addDailyPlanRow(`${candidate.startTime}-${candidate.endTime}`, {
       title: candidate.title,
       planDetails: candidate.details,
+      typeId: candidate.typeId,
       type: candidate.type
     });
   });
@@ -2987,7 +3111,7 @@ function addDailyPlanRow(timeRange = '', values = {}) {
   planCell.appendChild(planInput);
 
   const typeCell = document.createElement('td');
-  const typeSelect = createTypeSelect(values.type || '工作');
+  const typeSelect = createTypeSelect(values.typeId || values.type);
   typeSelect.addEventListener('keydown', handleDailyPlanGridKeydown);
   typeCell.appendChild(typeSelect);
 
@@ -3099,8 +3223,6 @@ function focusDailyPlanGridCell(rowIndex, columnIndex) {
   if (control instanceof HTMLInputElement) {
     control.select();
   } else if (control instanceof HTMLSelectElement) {
-    control.value = '工作';
-    control.dispatchEvent(new Event('change', { bubbles: true }));
     try {
       if (typeof control.showPicker === 'function') control.showPicker();
       else control.click();
@@ -3174,7 +3296,7 @@ async function saveDailyPlanTable() {
         title,
         planDetails,
         timeRange,
-        type: normalizeTaskType(typeSelect.value, title),
+        typeId: typeSelect.value,
         index
       };
     })
@@ -3197,7 +3319,8 @@ async function saveDailyPlanTable() {
         date,
         weekday: weekdayFromDate(date),
         location: '',
-        type: planRow.type,
+        typeId: planRow.typeId,
+        type: taskCategoryById(planRow.typeId)?.name || '',
         planDetails: planRow.planDetails,
         details: '',
         status: '未评价',
@@ -3306,8 +3429,8 @@ function renderTasks(options = {}) {
     title.addEventListener('keydown', blurOnEnter);
     const meta = document.createElement('div');
     meta.className = 'task-meta';
-    const typeSelect = createTypeSelect(task.type || inferTaskType(task.title));
-    typeSelect.addEventListener('change', () => updateTaskField(task.id, 'type', typeSelect.value));
+    const typeSelect = createTypeSelect(task.typeId || task.type);
+    typeSelect.addEventListener('change', () => updateTaskField(task.id, 'typeId', typeSelect.value));
     meta.appendChild(typeSelect);
     const locationText = formatMeta(task);
     if (locationText) {
@@ -3332,11 +3455,18 @@ function renderTasks(options = {}) {
     deleteButton.setAttribute('aria-label', '删除条目');
     deleteButton.textContent = '×';
     deleteButton.addEventListener('click', () => deleteTask(task.id));
-    const detailButton = document.createElement('button');
-    detailButton.className = `task-action-button status-${statusClass(task.status)}`;
-    detailButton.type = 'button';
-    detailButton.textContent = hasTaskDetail(task) ? '查看详情' : '填写详情';
-    detailButton.addEventListener('click', () => openTaskEditModal(task.id, 'details'));
+    const statusSelect = createTaskStatusSelect(task.status);
+    statusSelect.addEventListener('change', () => {
+      statusSelect.className = `task-status-select status-${statusClass(statusSelect.value)}`;
+      void updateTaskField(task.id, 'status', statusSelect.value, { render: false });
+    });
+    const noteButton = document.createElement('button');
+    noteButton.className = `task-note-button${clean(task.details) ? ' has-note' : ''}`;
+    noteButton.type = 'button';
+    noteButton.textContent = '✎';
+    noteButton.title = clean(task.details) ? '查看任务备注' : '添加任务备注';
+    noteButton.setAttribute('aria-label', noteButton.title);
+    noteButton.addEventListener('click', () => openTaskEditModal(task.id));
     const dragHandle = document.createElement('div');
     dragHandle.className = 'drag-handle';
     dragHandle.draggable = true;
@@ -3344,7 +3474,7 @@ function renderTasks(options = {}) {
     dragHandle.textContent = '≡';
     dragHandle.addEventListener('dragstart', (event) => handleTaskDragStart(event, task.id));
     dragHandle.addEventListener('dragend', handleTaskDragEnd);
-    actions.append(deleteButton, detailButton, dragHandle);
+    actions.append(deleteButton, statusSelect, noteButton, dragHandle);
 
     card.append(time, body, actions);
     taskList.appendChild(card);
@@ -3361,9 +3491,9 @@ function renderTaskDurationSummary(dayTasks) {
   if (!taskDurationSummary) return;
 
   const minutesByType = sumTaskMinutesByType(dayTasks);
-  const parts = TASK_SUMMARY_TYPES
-    .filter((type) => minutesByType[type] > 0)
-    .map((type) => `${type}：${formatDurationHours(minutesByType[type])}`);
+  const parts = taskSummaryCategories(minutesByType)
+    .filter((category) => minutesByType[category.id] > 0)
+    .map((category) => `${category.name}：${formatDurationHours(minutesByType[category.id])}`);
 
   taskDurationSummary.innerHTML = '';
   parts.forEach((part) => {
@@ -3375,7 +3505,7 @@ function renderTaskDurationSummary(dayTasks) {
 }
 
 function renderProfileStats() {
-  if (!profileStatsSummary || !profileStatsBars || !profileStatsPie || !profileStatsStartDate || !profileStatsPeriod) return;
+  if (!profileStatsSummary || !profileStatsPie || !profileStatsDaily || !profileStatsStartDate || !profileStatsPeriod) return;
 
   if (!committedProfileStatsStartDate) {
     committedProfileStatsStartDate = formatLocalDate(currentEffectiveNow || new Date());
@@ -3394,10 +3524,14 @@ function renderProfileStats() {
     return isRenderableTask(task) && date && date >= range.start && date <= range.end;
   });
   const scheduledDates = new Set(rangeTasks.map((task) => normalizeDate(task.date)).filter(Boolean));
-  const evaluatedTasks = rangeTasks.filter(hasTaskDetail);
+  const statusCounts = {
+    done: rangeTasks.filter((task) => normalizeTaskStatus(task.status) === '已完成').length,
+    partial: rangeTasks.filter((task) => normalizeTaskStatus(task.status) === '部分完成').length,
+    missed: rangeTasks.filter((task) => normalizeTaskStatus(task.status) === '未完成').length,
+    pending: rangeTasks.filter((task) => normalizeTaskStatus(task.status) === '未评价').length
+  };
   const minutesByType = sumTaskMinutesByType(rangeTasks);
   const totalMinutes = Object.values(minutesByType).reduce((sum, minutes) => sum + minutes, 0);
-  const averageDenominator = Math.max(scheduledDates.size, 1);
 
   if (profileStatsRangeText) {
     profileStatsRangeText.textContent = `${range.start} 至 ${range.end}`;
@@ -3405,13 +3539,14 @@ function renderProfileStats() {
 
   profileStatsSummary.innerHTML = '';
   [
-    ['安排天数', `${scheduledDates.size} 天`, `范围内共 ${rangeDates.length} 天`],
-    ['安排任务', `${rangeTasks.length} 个`, '可显示在任务页的条目'],
-    ['已评价任务', `${evaluatedTasks.length} 个`, `${formatPercent(evaluatedTasks.length, rangeTasks.length)} 已评价`],
-    ['总安排时长', formatDurationHours(totalMinutes), `平均值按 ${scheduledDates.size || 0} 个有安排的日期计算`]
-  ].forEach(([label, value, helper]) => {
+    ['有安排日期', `${scheduledDates.size} / ${rangeDates.length}`, `共 ${rangeTasks.length} 个任务`, 'scheduled'],
+    ['完成', `${statusCounts.done} 个`, `${formatPercent(statusCounts.done, rangeTasks.length)} 的任务`, 'done'],
+    ['部分完成', `${statusCounts.partial} 个`, `${formatPercent(statusCounts.partial, rangeTasks.length)} 的任务`, 'partial'],
+    ['未完成', `${statusCounts.missed} 个`, `${formatPercent(statusCounts.missed, rangeTasks.length)} 的任务`, 'missed'],
+    ['未确认', `${statusCounts.pending} 个`, `${formatPercent(statusCounts.pending, rangeTasks.length)} 的任务`, 'pending']
+  ].forEach(([label, value, helper, tone]) => {
     const card = document.createElement('div');
-    card.className = 'stat-card';
+    card.className = `stat-card stat-card-${tone}`;
     const title = document.createElement('span');
     title.textContent = label;
     const strong = document.createElement('strong');
@@ -3422,89 +3557,145 @@ function renderProfileStats() {
     profileStatsSummary.appendChild(card);
   });
 
-  profileStatsBars.innerHTML = '';
-  profileStatsPie.innerHTML = '';
-  const averageByType = TASK_SUMMARY_TYPES
-    .map((type) => ({
-      type,
-      minutes: (minutesByType[type] || 0) / averageDenominator
-    }))
-    .filter((item) => item.minutes > 0);
-  const maxAverage = Math.max(...averageByType.map((item) => item.minutes), 1);
+  renderProfilePlanAllocation(rangeDates, rangeTasks, minutesByType, totalMinutes);
+}
 
-  if (averageByType.length === 0) {
-    const empty = document.createElement('p');
-    empty.className = 'stats-empty muted';
-    empty.textContent = '这个范围内还没有可统计的任务安排。';
-    profileStatsBars.appendChild(empty);
-    renderProfileStatsPie([]);
-    return;
-  }
+function renderProfilePlanAllocation(rangeDates, rangeTasks, minutesByType, totalMinutes) {
+  renderProfileTimePie(minutesByType, totalMinutes);
+  profileStatsDaily.innerHTML = '';
 
-  renderProfileStatsPie(averageByType);
+  const tasksByDate = new Map();
+  rangeTasks.forEach((task) => {
+    const date = normalizeDate(task.date);
+    if (!tasksByDate.has(date)) tasksByDate.set(date, []);
+    tasksByDate.get(date).push(task);
+  });
 
-  averageByType.forEach((item) => {
+  const buckets = profileTimeBuckets(rangeDates, tasksByDate);
+  buckets.forEach((bucket) => {
+    const minutesByType = sumTaskMinutesByType(bucket.tasks);
+    const total = Object.values(minutesByType).reduce((sum, minutes) => sum + minutes, 0);
+    const capacity = Math.max(bucket.dateCount * 24 * 60, 1);
     const row = document.createElement('div');
-    row.className = 'stats-bar-row';
+    row.className = 'stats-day-row';
+
     const label = document.createElement('span');
-    label.className = 'stats-bar-label';
-    label.textContent = item.type;
+    label.className = 'stats-day-label';
+    label.textContent = bucket.label;
+
     const track = document.createElement('div');
-    track.className = 'stats-bar-track';
-    const fill = document.createElement('div');
-    fill.className = `stats-bar-fill type-${normalizeTaskTypeForClass(item.type)}`;
-    fill.style.width = `${Math.max(6, (item.minutes / maxAverage) * 100)}%`;
-    track.appendChild(fill);
+    track.className = 'stats-day-track';
+    if (total === 0) track.classList.add('empty');
+    taskSummaryCategories(minutesByType).forEach((category) => {
+      const minutes = minutesByType[category.id] || 0;
+      if (minutes <= 0) return;
+      const segment = document.createElement('span');
+      segment.className = 'stats-day-segment';
+      segment.style.background = category.color;
+      segment.style.width = `${Math.min(100, (minutes / capacity) * 100)}%`;
+      segment.title = `${category.name}：${formatDurationHours(minutes)}`;
+      track.appendChild(segment);
+    });
+
     const value = document.createElement('span');
-    value.className = 'stats-bar-value';
-    value.textContent = formatDurationHours(item.minutes);
+    value.className = 'stats-day-value';
+    value.textContent = total ? formatDurationHours(total) : '无安排';
     row.append(label, track, value);
-    profileStatsBars.appendChild(row);
+    profileStatsDaily.appendChild(row);
   });
 }
 
-function renderProfileStatsPie(items) {
-  if (!profileStatsPie) return;
+function renderProfileTimePie(minutesByType, totalMinutes) {
   profileStatsPie.innerHTML = '';
+  const entries = taskSummaryCategories(minutesByType)
+    .map((category) => ({ category, minutes: minutesByType[category.id] || 0 }))
+    .filter((entry) => entry.minutes > 0);
+  const chart = document.createElement('div');
+  chart.className = 'stats-time-pie';
+  chart.setAttribute('role', 'img');
 
-  const total = items.reduce((sum, item) => sum + item.minutes, 0);
-  const pie = document.createElement('div');
-  pie.className = 'stats-pie';
-
-  if (total <= 0) {
-    pie.classList.add('stats-pie-empty');
-    pie.textContent = '暂无';
-    profileStatsPie.appendChild(pie);
-    return;
+  if (totalMinutes > 0) {
+    let offset = 0;
+    const stops = entries.map((entry) => {
+      const start = offset;
+      offset += (entry.minutes / totalMinutes) * 100;
+      return `${entry.category.color} ${start}% ${offset}%`;
+    });
+    chart.style.background = `conic-gradient(${stops.join(', ')})`;
+    chart.setAttribute('aria-label', entries
+      .map((entry) => `${entry.category.name}${formatPercent(entry.minutes, totalMinutes)}`)
+      .join('，'));
+  } else {
+    chart.classList.add('empty');
+    chart.setAttribute('aria-label', '所选周期暂无任务安排');
   }
 
-  let cursor = 0;
-  const segments = items.map((item) => {
-    const start = cursor;
-    cursor += (item.minutes / total) * 100;
-    return `${taskTypeColor(item.type)} ${start}% ${cursor}%`;
-  });
-  pie.style.background = `conic-gradient(${segments.join(', ')})`;
-  pie.setAttribute('aria-label', `平均每日任务时长占比：${items.map((item) => `${item.type}${formatPercent(item.minutes, total)}`).join('，')}`);
+  const center = document.createElement('div');
+  center.className = 'stats-time-pie-center';
+  const centerLabel = document.createElement('span');
+  centerLabel.textContent = '总计划';
+  const centerValue = document.createElement('strong');
+  centerValue.textContent = totalMinutes ? formatDurationHours(totalMinutes) : '0小时';
+  center.append(centerLabel, centerValue);
+  chart.appendChild(center);
 
   const legend = document.createElement('div');
-  legend.className = 'stats-pie-legend';
-  items.forEach((item) => {
-    const row = document.createElement('span');
-    const swatch = document.createElement('i');
-    swatch.style.background = taskTypeColor(item.type);
-    const text = document.createElement('span');
-    text.textContent = `${item.type} ${formatPercent(item.minutes, total)}`;
-    row.append(swatch, text);
-    legend.appendChild(row);
-  });
+  legend.className = 'stats-time-legend';
+  if (entries.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'stats-empty muted';
+    empty.textContent = '暂无安排';
+    legend.appendChild(empty);
+  } else {
+    entries.forEach((entry) => {
+      const item = document.createElement('div');
+      item.className = 'stats-time-legend-item';
+      const swatch = document.createElement('i');
+      swatch.style.background = entry.category.color;
+      const name = document.createElement('span');
+      name.textContent = entry.category.name;
+      const value = document.createElement('strong');
+      value.textContent = `${formatPercent(entry.minutes, totalMinutes)} · ${formatDurationHours(entry.minutes)}`;
+      item.append(swatch, name, value);
+      legend.appendChild(item);
+    });
+  }
+  profileStatsPie.append(chart, legend);
+}
 
-  profileStatsPie.append(pie, legend);
+function profileTimeBuckets(rangeDates, tasksByDate) {
+  if (rangeDates.length <= 31) {
+    return rangeDates.map((date) => ({
+      key: date,
+      label: `${date.slice(5).replace('-', '/')} ${weekdayFromDate(date)}`,
+      dateCount: 1,
+      tasks: tasksByDate.get(date) || []
+    }));
+  }
+
+  const buckets = new Map();
+  rangeDates.forEach((date) => {
+    const month = date.slice(0, 7);
+    if (!buckets.has(month)) {
+      const [year, monthNumber] = month.split('-');
+      buckets.set(month, {
+        key: month,
+        label: `${year}年${Number(monthNumber)}月`,
+        dateCount: 0,
+        tasks: []
+      });
+    }
+    const bucket = buckets.get(month);
+    bucket.dateCount += 1;
+    bucket.tasks.push(...(tasksByDate.get(date) || []));
+  });
+  return Array.from(buckets.values());
 }
 
 function renderAll() {
   populateJournalTagSelects();
   renderJournalTagSettings();
+  renderTaskCategorySettings();
   renderTasks();
   renderJournalList();
   renderSelectedJournal();
@@ -3568,6 +3759,8 @@ function mergeTasks(currentTasks, importedTasks) {
   const orderCounters = new Map();
   const normalized = importedTasks.map((task, index) => {
     const date = normalizeDate(task.date);
+    const categoryId = resolveTaskCategoryId(task.typeId, taskCategories(), task.type || inferTaskType(task.title));
+    const category = taskCategoryById(categoryId);
     const order = Number.isFinite(Number(task.order))
       ? Number(task.order)
       : nextOrderForDate(date, orderCounters);
@@ -3580,7 +3773,8 @@ function mergeTasks(currentTasks, importedTasks) {
       date,
       weekday: clean(task.weekday),
       location: clean(task.location),
-      type: normalizeTaskType(task.type, task.title),
+      typeId: categoryId,
+      type: category ? category.name : clean(task.type),
       planDetails: clean(task.planDetails),
       details: clean(task.details),
       status: clean(task.status) || '未评价',
@@ -3625,7 +3819,8 @@ function templateItemsForDate(date) {
     startTime: normalizeTime(task.startTime),
     endTime: normalizeTime(task.endTime),
     title: clean(task.title),
-    type: normalizeTaskType(task.type, task.title)
+    typeId: taskCategoryForTask(task)?.id || '',
+    type: taskCategoryForTask(task)?.name || clean(task.type)
   }));
 }
 
@@ -3638,7 +3833,7 @@ function openSaveTaskTemplateModal() {
   }
 
   taskTemplateName.value = '';
-  taskTemplateSaveSummary.textContent = `将保存 ${items.length} 条安排，仅包含时间段、任务名和任务标签。`;
+  taskTemplateSaveSummary.textContent = `将保存 ${items.length} 条安排，仅包含时间段、任务名和任务分类。`;
   clearTaskTemplateSaveError();
   saveTaskTemplateModal.classList.remove('hidden');
   requestAnimationFrame(() => taskTemplateName.focus());
@@ -3734,7 +3929,23 @@ function renderTaskTemplateList() {
     toggle.textContent = template.id === expandedTaskTemplateId ? '收起' : '展开';
     row.append(selection, name, count, toggle);
     row.addEventListener('click', () => selectTaskTemplate(template.id));
-    item.appendChild(row);
+
+    const deleteButton = document.createElement('button');
+    deleteButton.type = 'button';
+    deleteButton.className = 'task-template-delete-button';
+    deleteButton.textContent = '×';
+    deleteButton.title = `删除模板“${template.name}”`;
+    deleteButton.setAttribute('aria-label', deleteButton.title);
+    deleteButton.addEventListener('click', async (event) => {
+      event.stopPropagation();
+      deleteButton.disabled = true;
+      await deleteTaskTemplate(template.id);
+    });
+
+    const rowLayout = document.createElement('div');
+    rowLayout.className = 'task-template-row-layout';
+    rowLayout.append(row, deleteButton);
+    item.appendChild(rowLayout);
 
     if (template.id === expandedTaskTemplateId) {
       const details = document.createElement('div');
@@ -3746,6 +3957,22 @@ function renderTaskTemplateList() {
   });
 
   confirmReuseTemplateButton.disabled = !templates.some((template) => template.id === selectedTaskTemplateId);
+}
+
+async function deleteTaskTemplate(templateId) {
+  const templates = taskTemplates();
+  const template = templates.find((item) => item.id === templateId);
+  if (!template) return;
+
+  profile = {
+    ...normalizedProfile(),
+    taskTemplates: templates.filter((item) => item.id !== templateId)
+  };
+  if (selectedTaskTemplateId === templateId) selectedTaskTemplateId = '';
+  if (expandedTaskTemplateId === templateId) expandedTaskTemplateId = '';
+  await saveState();
+  renderTaskTemplateList();
+  setStatus(`已删除安排模板“${template.name}”。`, '', 4000);
 }
 
 function selectTaskTemplate(templateId) {
@@ -3771,8 +3998,11 @@ function createTaskTemplatePreview(task) {
   title.textContent = task.title;
 
   const type = document.createElement('span');
-  type.className = `task-template-type type-${task.type}`;
-  type.textContent = task.type;
+  const category = taskCategoryForTask(task);
+  type.className = 'task-template-type';
+  type.textContent = category ? category.name : '未分配';
+  if (category) type.dataset.taskCategoryId = category.id;
+  styleTaskCategoryControl(type, category);
   row.append(time, title, type);
   return row;
 }
@@ -3797,6 +4027,7 @@ async function confirmReuseTemplate() {
       date: targetDate,
       weekday: weekdayFromDate(targetDate),
       location: '',
+      typeId: task.typeId,
       type: task.type,
       planDetails: '',
       details: '',
@@ -3822,6 +4053,7 @@ async function confirmReuseTemplate() {
 }
 
 function createBlankTask(date) {
+  const category = defaultTaskCategory();
   return {
     id: `manual-${Date.now()}`,
     title: '',
@@ -3830,7 +4062,8 @@ function createBlankTask(date) {
     date,
     weekday: '',
     location: '',
-    type: '工作',
+    typeId: category ? category.id : '',
+    type: category ? category.name : '',
     planDetails: '',
     details: '',
     status: '未评价',
@@ -3845,7 +4078,7 @@ function createBlankTask(date) {
 function removeGeneratedScheduleTasks(taskItems) {
   return taskItems.filter((task) => {
     if (task.source === 'schedule-template') return false;
-    return !(task.type === '课程' && task.sheetName === '手动课表');
+    return task.sheetName !== '手动课表';
   });
 }
 
@@ -3949,22 +4182,68 @@ function commitTaskTimeField(taskId, field, input) {
 }
 
 function createTypeSelect(value) {
+  const categories = taskCategories();
+  const selectedId = resolveTaskCategoryId(value, categories, value);
+  const selectedCategory = taskCategoryById(selectedId, categories);
   const select = document.createElement('select');
-  select.className = `task-type-select type-${normalizeTaskType(value)}`;
-  select.setAttribute('aria-label', '任务标签');
+  select.className = 'task-type-select';
+  select.setAttribute('aria-label', '任务分类');
 
-  TASK_TYPES.forEach((type) => {
+  categories.filter((category) => category.active || category.id === selectedId).forEach((category) => {
     const option = document.createElement('option');
-    option.value = type;
-    option.textContent = type;
+    option.value = category.id;
+    option.textContent = category.active ? category.name : `${category.name}（已停用）`;
     select.appendChild(option);
   });
 
-  select.value = normalizeTaskType(value);
+  select.value = selectedCategory ? selectedCategory.id : (select.options[0]?.value || '');
+  select.dataset.taskCategoryId = select.value;
+  styleTaskCategoryControl(select, taskCategoryById(select.value, categories));
   select.addEventListener('change', () => {
-    select.className = `task-type-select type-${normalizeTaskType(select.value)}`;
+    select.dataset.taskCategoryId = select.value;
+    styleTaskCategoryControl(select, taskCategoryById(select.value, categories));
   });
   return select;
+}
+
+function styleTaskCategoryControl(control, category) {
+  const color = category ? category.color : '#8b96a3';
+  const tint = colorWithAlpha(color, 0.2);
+  control.style.setProperty('--task-category-color', color);
+  control.style.setProperty('--task-category-tint', tint);
+  control.style.borderColor = color;
+  control.style.backgroundColor = tint;
+}
+
+function colorWithAlpha(color, alpha) {
+  const match = clean(color).match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+  if (!match) return 'rgba(139, 150, 163, 0.1)';
+  return `rgba(${parseInt(match[1], 16)}, ${parseInt(match[2], 16)}, ${parseInt(match[3], 16)}, ${alpha})`;
+}
+
+function createTaskStatusSelect(value) {
+  const status = normalizeTaskStatus(value);
+  const select = document.createElement('select');
+  select.className = `task-status-select status-${statusClass(status)}`;
+  select.setAttribute('aria-label', '完成情况');
+  [
+    ['未评价', '完成情况'],
+    ['已完成', '完成'],
+    ['部分完成', '部分完成'],
+    ['未完成', '未完成']
+  ].forEach(([optionValue, label]) => {
+    const option = document.createElement('option');
+    option.value = optionValue;
+    option.textContent = label;
+    select.appendChild(option);
+  });
+  select.value = status;
+  return select;
+}
+
+function normalizeTaskStatus(value) {
+  const status = clean(value);
+  return ['已完成', '部分完成', '未完成'].includes(status) ? status : '未评价';
 }
 
 function blurOnEnter(event) {
@@ -3979,13 +4258,19 @@ async function updateTaskField(taskId, field, value, options = {}) {
   if (!task) return;
 
   task[field] = clean(value);
-  if (field === 'type') {
-    task.type = normalizeTaskType(value, task.title);
+  if (field === 'typeId') {
+    const category = taskCategoryById(value);
+    task.typeId = category ? category.id : defaultTaskCategory()?.id || '';
+    task.type = category ? category.name : defaultTaskCategory()?.name || '';
   }
   if (['title', 'startTime', 'endTime', 'planDetails'].includes(field)) {
     task.isDraft = !clean(task.title) || !clean(task.startTime) || !clean(task.endTime);
   }
   const normalizedTasks = options.splitCrossDay ? normalizeTaskDayBoundaries() : { changed: false };
+
+  if (field === 'startTime' || field === 'endTime') {
+    publishFloatingTask(currentEffectiveNow);
+  }
 
   await saveState();
   if (options.render === false) {
@@ -4342,174 +4627,6 @@ function classifyTaskStage(task, now) {
   return 'current';
 }
 
-function checkDueReminders(now) {
-  const date = formatLocalDate(now);
-  const previousDate = shiftDate(date, -1);
-  const reminderTasks = restoreSplitTaskParents(tasks).filter((task) => (
-    isRenderableTask(task)
-    && [previousDate, date].includes(normalizeDate(task.date))
-  ));
-  const currentCheckValue = reminderCheckValue(now);
-  const previousCheckValue = lastReminderCheckValue;
-  const duePreviousValue = reminderPreviousValue(previousCheckValue, currentCheckValue);
-  const dueReminders = [];
-  lastReminderCheckValue = currentCheckValue;
-
-  reminderTasks.forEach((task, taskIndex) => {
-    buildReminderEvents(task).forEach((event) => {
-      const eventCheckValue = reminderDateStartCheckValue(task.date) + event.minute;
-      if (!isReminderDue(duePreviousValue, currentCheckValue, eventCheckValue)) return;
-      const key = `${eventCheckValue}|${task.id}|${event.kind}`;
-      if (firedReminderKeys.has(key)) return;
-
-      firedReminderKeys.add(key);
-      dueReminders.push({
-        checkValue: eventCheckValue,
-        priority: reminderEventPriority(event.kind),
-        order: Number.isFinite(task.order) ? task.order : taskIndex,
-        payload: {
-          title: '日织提醒',
-          body: event.message
-        }
-      });
-    });
-  });
-
-  dueReminders
-    .sort((a, b) => a.checkValue - b.checkValue || a.priority - b.priority || a.order - b.order)
-    .forEach((item) => showReminderMessage(item.payload));
-
-  trimOldReminderKeys(date);
-}
-
-function reminderPreviousValue(previousValue, currentValue) {
-  if (previousValue === null) return null;
-  if (currentValue < previousValue) return currentValue - 1;
-  if (currentValue - previousValue > MISSED_REMINDER_BACKLOG_LIMIT_MINUTES) return currentValue - 1;
-  return previousValue;
-}
-
-async function showReminderMessage(payload) {
-  try {
-    const result = await window.whbr.showReminder(payload);
-    if (result && result.error) {
-      console.warn(result.error);
-    }
-  } catch (error) {
-    console.warn(error);
-  }
-}
-
-function isReminderDue(previousValue, currentValue, eventValue) {
-  if (previousValue === null) return eventValue === currentValue;
-  if (currentValue < previousValue) return eventValue === currentValue;
-  return eventValue > previousValue && eventValue <= currentValue;
-}
-
-function reminderCheckValue(date) {
-  return dayStartCheckValue(date) + date.getHours() * 60 + date.getMinutes();
-}
-
-function reminderEventPriority(kind) {
-  if (/end|break/.test(kind)) return 0;
-  if (/start|focus|next/.test(kind)) return 1;
-  return 2;
-}
-
-function dayStartCheckValue(date) {
-  const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  return Math.floor(start.getTime() / 60000);
-}
-
-function reminderDateStartCheckValue(date) {
-  const parsed = parseLocalDate(date);
-  return parsed ? dayStartCheckValue(parsed) : NaN;
-}
-
-function buildReminderEvents(task) {
-  const start = timeToMinutes(task.startTime);
-  const end = timeToMinutes(task.endTime);
-  if (start === null || end === null) return [];
-  const isAllDay = isAllDayRange(task.startTime, task.endTime);
-  if (start === end && !isAllDay) return [];
-  const timelineEnd = isAllDay ? 24 * 60 : (end <= start ? end + (24 * 60) : end);
-
-  const profileData = normalizedProfile();
-  const type = normalizeTaskType(task.type, task.title);
-  const title = clean(task.title) || '当前安排';
-  const events = [];
-
-  if (type === '课程') {
-    addReminderEvent(events, start, 'course-start', `${title} 要上课了，专注听讲。`);
-    addReminderEvent(events, timelineEnd, 'course-end', `${title} 下课了，休息一下。`);
-    addRepeatingReminderEvents(events, start, timelineEnd, profileData.classDuration, profileData.classBreakLength, {
-      focusKind: 'course-next',
-      breakKind: 'course-break',
-      focusMessage: `${title} 要继续上课了，专注听讲。`,
-      breakMessage: `${title} 下课了，休息一下。`
-    });
-    return dedupeEvents(events);
-  }
-
-  if (type === '工作' || type === '学习') {
-    const action = type === '学习' ? '学习' : '工作';
-    addReminderEvent(events, start, `${type}-start`, `要${action}了，高效专注。`);
-    addReminderEvent(events, timelineEnd, `${type}-end`, `${title} 结束了，休息一下。`);
-    if (profileData.breakReminder) {
-      addRepeatingReminderEvents(events, start, timelineEnd, profileData.workFocusLength, profileData.workBreakLength, {
-        focusKind: `${type}-focus`,
-        breakKind: `${type}-break`,
-        focusMessage: `要${action}了，高效专注。`,
-        breakMessage: `${action}很久了，起来活动一下吧。`
-      });
-    }
-    return dedupeEvents(events);
-  }
-
-  addReminderEvent(events, start, 'life-start', `${title} 开始了。`);
-  addReminderEvent(events, timelineEnd, 'life-end', `${title} 结束了，稍微整理一下状态。`);
-  return dedupeEvents(events);
-}
-
-function addRepeatingReminderEvents(events, start, end, focusMinutes, breakMinutes, config) {
-  const focusLengthMinutes = numericSetting(focusMinutes, 50);
-  const breakLengthMinutes = numericSetting(breakMinutes, 10);
-  let cursor = start;
-  let cycle = 0;
-
-  while (cursor < end && cycle < 40) {
-    const breakAt = cursor + focusLengthMinutes;
-    if (breakAt < end) addReminderEvent(events, breakAt, `${config.breakKind}-${cycle}`, config.breakMessage);
-
-    const focusAt = breakAt + breakLengthMinutes;
-    if (focusAt < end) addReminderEvent(events, focusAt, `${config.focusKind}-${cycle}`, config.focusMessage);
-
-    cursor = focusAt;
-    cycle += 1;
-  }
-}
-
-function addReminderEvent(events, minute, kind, message) {
-  if (!Number.isFinite(minute) || minute < 0 || minute > 2 * 24 * 60) return;
-  events.push({ minute, kind, message });
-}
-
-function dedupeEvents(events) {
-  const seen = new Set();
-  return events.filter((event) => {
-    const key = `${event.minute}|${event.kind}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-function trimOldReminderKeys(currentDate) {
-  firedReminderKeys.forEach((key) => {
-    if (!key.startsWith(`${currentDate}|`)) firedReminderKeys.delete(key);
-  });
-}
-
 function taskDurationMinutes(task) {
   const start = timeToMinutes(task.startTime);
   const end = timeToMinutes(task.endTime);
@@ -4520,9 +4637,8 @@ function taskDurationMinutes(task) {
 }
 
 function taskSummaryType(task) {
-  const explicitType = clean(task.type);
-  if (!explicitType) return '未分配';
-  return TASK_TYPES.includes(explicitType) ? explicitType : '未分配';
+  const category = taskCategoryForTask(task);
+  return category ? category.id : UNASSIGNED_CATEGORY_ID;
 }
 
 function sumTaskMinutesByType(taskItems) {
@@ -4532,7 +4648,15 @@ function sumTaskMinutesByType(taskItems) {
     const type = taskSummaryType(task);
     summary[type] = (summary[type] || 0) + minutes;
     return summary;
-  }, Object.fromEntries(TASK_SUMMARY_TYPES.map((type) => [type, 0])));
+  }, Object.fromEntries(taskSummaryCategories().map((category) => [category.id, 0])));
+}
+
+function taskSummaryCategories(minutesByType = {}) {
+  const categories = taskCategories().filter((category) => category.active || (minutesByType[category.id] || 0) > 0);
+  return [
+    ...categories,
+    { id: UNASSIGNED_CATEGORY_ID, name: '未分配', color: '#8b96a3', cycleEnabled: false, focusMinutes: 50, breakMinutes: 10, active: true }
+  ];
 }
 
 function formatDurationHours(minutes) {
@@ -4547,22 +4671,6 @@ function formatPercent(value, total) {
   return `${Math.round((value / total) * 100)}%`;
 }
 
-function normalizeTaskTypeForClass(type) {
-  if (type === '课程') return 'course';
-  if (type === '学习') return 'study';
-  if (type === '生活') return 'life';
-  if (type === '未分配') return 'unassigned';
-  return 'work';
-}
-
-function taskTypeColor(type) {
-  if (type === '课程') return '#a86bc9';
-  if (type === '学习') return '#b9892e';
-  if (type === '生活') return '#7aa35e';
-  if (type === '未分配') return '#8b96a3';
-  return '#2e8f65';
-}
-
 function dateRangeForProfileStats(rangeType, baseDate) {
   const parsedBase = parseLocalDate(normalizeDate(baseDate));
   const base = parsedBase || new Date();
@@ -4574,22 +4682,28 @@ function dateRangeForProfileStats(rangeType, baseDate) {
   }
 
   if (rangeType === 'week') {
+    const mondayOffset = (start.getDay() + 6) % 7;
+    start.setDate(start.getDate() - mondayOffset);
     end.setTime(start.getTime());
     end.setDate(start.getDate() + 6);
     return { start: formatLocalDate(start), end: formatLocalDate(end) };
   }
 
   if (rangeType === 'month') {
-    end.setMonth(start.getMonth() + 1, start.getDate() - 1);
+    start.setDate(1);
+    end.setFullYear(start.getFullYear(), start.getMonth() + 1, 0);
     return { start: formatLocalDate(start), end: formatLocalDate(end) };
   }
 
   if (rangeType === 'quarter') {
-    end.setMonth(start.getMonth() + 3, start.getDate() - 1);
+    const quarterStartMonth = Math.floor(start.getMonth() / 3) * 3;
+    start.setMonth(quarterStartMonth, 1);
+    end.setFullYear(start.getFullYear(), quarterStartMonth + 3, 0);
     return { start: formatLocalDate(start), end: formatLocalDate(end) };
   }
 
-  end.setFullYear(start.getFullYear() + 1, start.getMonth(), start.getDate() - 1);
+  start.setMonth(0, 1);
+  end.setFullYear(start.getFullYear(), 11, 31);
   return { start: formatLocalDate(start), end: formatLocalDate(end) };
 }
 
@@ -4666,11 +4780,11 @@ function mergeJournals(currentJournals, importedJournals) {
 
   importedJournals.forEach((journal) => {
     const key = journalIdentity(journal);
-    const tagId = normalizeJournalTagId(journal.tagId) || legacyRatingToTagId(journal.rating);
+    const tagIds = journalTagIds(journal);
     const media = Array.isArray(journal.media)
       ? normalizeJournalMedia(journal.media)
       : normalizeJournalMedia(journalMap.get(key) && journalMap.get(key).media);
-    if (!key || (!journal.content && !tagId && media.length === 0)) return;
+    if (!key || (!journal.content && tagIds.length === 0 && media.length === 0)) return;
 
     journalMap.set(key, {
       id: journal.id || `journal-${Date.now()}`,
@@ -4679,7 +4793,7 @@ function mergeJournals(currentJournals, importedJournals) {
       dateRangeEnd: normalizeDate(journal.dateRangeEnd),
       sheetName: clean(journal.sheetName),
       content: clean(journal.content),
-      tagId: normalizeJournalTagId(tagId),
+      tagIds,
       media,
       source: clean(journal.source) || 'manual',
       updatedAt: new Date().toISOString()
@@ -4722,7 +4836,7 @@ function normalizeJournalMedia(media) {
 function journalHasCustomContent(journal) {
   return Boolean(
     clean(journal && journal.content)
-    || normalizeJournalTagId(journal && journal.tagId)
+    || journalTagIds(journal).length
     || normalizeJournalMedia(journal && journal.media).length
   );
 }
@@ -4740,7 +4854,7 @@ async function saveSelectedJournal() {
 
 async function saveJournalForDate(date) {
   const content = clean(journalContent.value);
-  const tagId = normalizeJournalTagId(journalTag ? journalTag.value : '');
+  const tagIds = selectedJournalTagIds(journalTag);
   const existingJournal = findJournalForDate(date, date);
   const media = normalizeJournalMedia(existingJournal && existingJournal.media);
 
@@ -4754,7 +4868,7 @@ async function saveJournalForDate(date) {
     date,
     sheetName: '',
     content,
-    tagId,
+    tagIds,
     media,
     source: 'manual'
   }]);
@@ -4763,7 +4877,7 @@ async function saveJournalForDate(date) {
 
   await saveState();
   renderJournalList();
-  journalSaveState.textContent = content ? '已保存' : '已清空';
+  journalSaveState.textContent = content || tagIds.length ? '已保存' : '已清空';
   return true;
 }
 
@@ -4771,14 +4885,14 @@ function hasUnsavedJournalChanges(dateOverride = '') {
   if (!journalContent || !journalDate) return false;
   const date = normalizeDate(dateOverride || committedDateInputValue(journalDate) || journalDate.value);
   const content = clean(journalContent.value);
-  const tagId = normalizeJournalTagId(journalTag ? journalTag.value : '');
+  const tagIds = selectedJournalTagIds(journalTag);
 
-  if (!date) return Boolean(content || tagId);
+  if (!date) return Boolean(content || tagIds.length);
 
   const journal = findJournalForDate(date, date);
   const savedContent = journal ? clean(journal.content) : '';
-  const savedTagId = journal ? normalizeJournalTagId(journal.tagId) : '';
-  return content !== savedContent || tagId !== savedTagId;
+  const savedTagIds = journal ? journalTagIds(journal) : [];
+  return content !== savedContent || tagIds.join('|') !== savedTagIds.join('|');
 }
 
 async function handleJournalDateCommit(nextDate, previousDate) {
@@ -5004,7 +5118,7 @@ async function confirmMediaUpload() {
     date: session.date,
     sheetName: '',
     content: existing ? existing.content : clean(journalContent.value),
-    tagId: existing ? existing.tagId : normalizeJournalTagId(journalTag ? journalTag.value : ''),
+    tagIds: existing ? journalTagIds(existing) : selectedJournalTagIds(journalTag),
     media,
     source: 'manual'
   }]);
@@ -5207,7 +5321,7 @@ function renderSelectedJournal() {
   const date = clean(journalDate.value);
   const journal = findJournalForDate(normalizeDate(date), date);
   journalContent.value = journal ? journal.content : '';
-  if (journalTag) journalTag.value = normalizeJournalTagId(journal && journal.tagId);
+  setSelectedJournalTagIds(journalTag, journal ? journalTagIds(journal) : []);
   renderTagPicker(journalTag, journalTagPaletteButton, journalTagPalette);
   journalSaveState.textContent = journal ? '已加载' : '尚未保存';
 }
@@ -5253,7 +5367,6 @@ function renderJournalList() {
   const visibleJournals = filteredJournalsForList();
 
   if (visibleJournals.length === 0) {
-    if (appliedJournalSearch) return;
     const empty = document.createElement('p');
     empty.className = 'muted';
     empty.textContent = journals.length === 0
@@ -5278,8 +5391,8 @@ function renderJournalList() {
     dateText.className = 'journal-item-date';
     dateText.textContent = journalDisplayDate(journal);
     title.appendChild(dateText);
-    const tagBadge = createJournalTagBadge(journal.tagId);
-    if (tagBadge) title.appendChild(tagBadge);
+    const tagBadges = createJournalTagBadges(journalTagIds(journal));
+    if (tagBadges) title.appendChild(tagBadges);
     const preview = document.createElement('span');
     preview.className = 'journal-item-preview';
     const mediaCount = normalizeJournalMedia(journal.media).length;
@@ -5290,22 +5403,28 @@ function renderJournalList() {
 }
 
 function filteredJournalsForList() {
+  let visibleJournals = journals;
+
   if (appliedJournalSearch) {
     const searchTerm = appliedJournalSearch.toLocaleLowerCase();
-    return journals.filter((journal) => journalSearchText(journal).toLocaleLowerCase().includes(searchTerm));
+    visibleJournals = visibleJournals.filter((journal) => journalSearchText(journal).toLocaleLowerCase().includes(searchTerm));
   }
 
   if (journalFilterMode === 'date') {
     const selectedDate = normalizeDate(journalViewDate ? journalViewDate.value : '');
     if (!selectedDate) return [];
-    return journals.filter((journal) => journalPrimaryDate(journal) === selectedDate);
+    visibleJournals = visibleJournals.filter((journal) => journalPrimaryDate(journal) === selectedDate);
   }
 
   if (journalFilterMode === 'tag') {
-    return journals.filter((journal) => normalizeJournalTagId(journal.tagId) === appliedJournalTagFilter);
+    if (appliedJournalTagFilters.length === 0) return visibleJournals;
+    visibleJournals = visibleJournals.filter((journal) => {
+      const ids = new Set(journalTagIds(journal));
+      return appliedJournalTagFilters.every((tagId) => ids.has(tagId));
+    });
   }
 
-  return journals;
+  return visibleJournals;
 }
 
 function commitJournalSearch() {
@@ -5316,17 +5435,20 @@ function commitJournalSearch() {
 }
 
 function journalSearchText(journal) {
-  const tag = journalTagById(journal.tagId);
+  const tags = journalTagIds(journal).map(journalTagById).filter(Boolean);
   return [
     journalDisplayDate(journal),
     journal.content,
-    tag ? tag.shortName : '',
-    tag ? tag.fullName : ''
+    ...tags.flatMap((tag) => [tag.shortName, tag.fullName])
   ].filter(Boolean).join(' ');
 }
 
 function updateJournalFilterControls() {
-  if (journalFilterModeButton) journalFilterModeButton.textContent = journalFilterModeLabel(journalFilterMode);
+  journalFilterModeButtons.forEach((button) => {
+    const active = button.dataset.journalFilterMode === journalFilterMode;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
   if (journalTagFilter) journalTagFilter.disabled = journalFilterMode !== 'tag';
   if (journalTagFilterPaletteButton) journalTagFilterPaletteButton.disabled = journalFilterMode !== 'tag';
   if (journalTagFilterField) journalTagFilterField.classList.toggle('hidden', journalFilterMode !== 'tag');
@@ -5334,34 +5456,27 @@ function updateJournalFilterControls() {
   if (journalFilterMode !== 'tag') closeAllTagPalettes();
 }
 
-function journalFilterModeLabel(mode) {
-  if (mode === 'date') return '日期记录';
-  if (mode === 'tag') return '标签记录';
-  return '显示全部';
-}
-
-function cycleJournalFilterMode() {
-  if (journalFilterMode === 'all') {
-    journalFilterMode = 'date';
-  } else if (journalFilterMode === 'date') {
-    journalFilterMode = 'tag';
-    appliedJournalTagFilter = normalizeJournalTagId(journalTagFilter ? journalTagFilter.value : '');
-  } else {
-    journalFilterMode = 'all';
-  }
+function setJournalFilterMode(mode) {
+  journalFilterMode = ['date', 'tag'].includes(mode) ? mode : 'all';
+  if (journalFilterMode === 'tag') appliedJournalTagFilters = selectedJournalTagIds(journalTagFilter);
 
   refreshJournalFilterViewPreservingScroll();
 }
 
-function createJournalTagBadge(tagId) {
-  const tag = journalTagById(tagId);
-  if (!tag) return null;
-  const badge = document.createElement('span');
-  badge.className = 'journal-tag-badge';
-  badge.style.background = tag.color;
-  badge.title = `${tag.shortName}：${tag.fullName}`;
-  badge.setAttribute('aria-label', badge.title);
-  return badge;
+function createJournalTagBadges(tagIds) {
+  const tags = normalizeJournalTagIds(tagIds).map(journalTagById).filter(Boolean);
+  if (tags.length === 0) return null;
+  const group = document.createElement('span');
+  group.className = 'journal-tag-badges';
+  group.setAttribute('aria-label', tags.map((tag) => tag.shortName).join('、'));
+  tags.forEach((tag) => {
+    const badge = document.createElement('span');
+    badge.className = 'journal-tag-badge';
+    badge.style.background = tag.color;
+    badge.title = `${tag.shortName}：${tag.fullName}`;
+    group.appendChild(badge);
+  });
+  return group;
 }
 
 function ensureJournalViewDate() {
@@ -5380,8 +5495,8 @@ function renderJournalView(journal, targetDate, fallbackTitle) {
   const title = fallbackTitle || (journal ? journalDisplayDate(journal) : normalizedDate || '未标记日期');
   journalViewTitle.innerHTML = '';
   journalViewTitle.append(document.createTextNode(title));
-  const tagBadge = journal ? createJournalTagBadge(journal.tagId) : null;
-  if (tagBadge) journalViewTitle.appendChild(tagBadge);
+  const tagBadges = journal ? createJournalTagBadges(journalTagIds(journal)) : null;
+  if (tagBadges) journalViewTitle.appendChild(tagBadges);
   journalViewContent.innerHTML = '';
 
   const journalSection = document.createElement('section');
@@ -5410,23 +5525,19 @@ function renderJournalView(journal, targetDate, fallbackTitle) {
   taskHeading.textContent = '任务完成情况';
   taskSection.appendChild(taskHeading);
 
-  const tasksWithReflections = dayTasks.filter((task) => hasTaskDetail(task));
-  if (tasksWithReflections.length === 0) {
+  const tasksWithFeedback = dayTasks.filter((task) => hasTaskStatusFeedback(task) || clean(task.details));
+  if (tasksWithFeedback.length === 0) {
     const empty = document.createElement('p');
-    empty.textContent = '这一天还没有任务完成记录。';
+    empty.textContent = '这一天还没有确认任务完成情况。';
     taskSection.appendChild(empty);
   } else {
-    tasksWithReflections.forEach((task) => {
+    tasksWithFeedback.forEach((task) => {
       const item = document.createElement('div');
       item.className = 'journal-task-detail';
       const title = document.createElement('strong');
       title.textContent = `${task.startTime || '--:--'} - ${task.endTime || '--:--'} ${task.title || '未命名安排'}`;
-      item.append(
-        title,
-        createJournalTaskField('任务目标', task.planDetails || '没有填写任务目标。'),
-        createJournalTaskField('具体完成内容及反思', task.details || '没有填写完成内容及反思。'),
-        createJournalTaskField('完成情况', task.status || '未评价')
-      );
+      item.append(title, createJournalTaskField('完成情况', taskStatusLabel(task.status)));
+      if (clean(task.details)) item.appendChild(createJournalTaskField('任务备注', task.details));
       taskSection.appendChild(item);
     });
   }
@@ -5518,9 +5629,11 @@ function formatMeta(task) {
 }
 
 function normalizeTaskType(value, title = '') {
-  const text = clean(value);
-  if (TASK_TYPES.includes(text)) return text;
-  return inferTaskType(title || text);
+  const categories = taskCategories();
+  const direct = taskCategoryFromInput(value, categories);
+  if (direct) return direct.name;
+  const inferredId = resolveTaskCategoryId('', categories, inferTaskType(title || value));
+  return taskCategoryById(inferredId, categories)?.name || defaultTaskCategory(categories)?.name || '';
 }
 
 function inferTaskType(title) {
@@ -5615,32 +5728,32 @@ function isRenderableTask(task) {
   if (task.source === 'untimed-table') return Boolean(title);
   if (!task.startTime || !task.endTime) return false;
   if (!title) return false;
-  if (normalizeTaskType(task.type, title) === '课程') return true;
   if (task.source === 'schedule-template') return true;
   if (/^[\d\s√✓×xX-]+$/.test(title)) return false;
   return /[\u4e00-\u9fa5A-Za-z]/.test(title);
 }
 
-function hasTaskDetail(task) {
-  const status = clean(task.status);
-  return Boolean(clean(task.details)) || Boolean(status && status !== '未评价');
+function hasTaskStatusFeedback(task) {
+  return normalizeTaskStatus(task && task.status) !== '未评价';
 }
 
-function openTaskEditModal(taskId, focusTarget) {
+function taskStatusLabel(status) {
+  const normalized = normalizeTaskStatus(status);
+  if (normalized === '已完成') return '完成';
+  if (normalized === '部分完成') return '部分完成';
+  if (normalized === '未完成') return '未完成';
+  return '未确认';
+}
+
+function openTaskEditModal(taskId) {
   const task = tasks.find((item) => item.id === taskId);
   if (!task) return;
 
   editingTaskId = taskId;
   taskEditTitle.textContent = task.title || '未命名安排';
   taskDetails.value = task.details || '';
-  taskStatus.value = task.status || '未评价';
   taskEditModal.classList.remove('hidden');
-
-  if (focusTarget === 'status') {
-    taskStatus.focus();
-  } else {
-    taskDetails.focus();
-  }
+  taskDetails.focus();
 }
 
 function closeTaskEditModal() {
@@ -5654,10 +5767,9 @@ async function saveTaskEdit(event) {
   if (!task) return;
 
   task.details = clean(taskDetails.value);
-  task.status = clean(taskStatus.value) || '未评价';
   await saveState();
   closeTaskEditModal();
-  renderTasks();
+  renderTasksPreservingScroll();
 }
 
 function statusClass(status) {
@@ -5671,18 +5783,13 @@ function pageTitleFor(page) {
   if (page === 'tasks') return '任务';
   if (page === 'records') return '记录';
   if (page === 'settings') return '设置';
-  return '个人';
+  return '统计';
 }
 
 function defaultProfile() {
   return {
-    focusLength: 50,
-    breakReminder: true,
-    classDuration: 50,
-    classBreakLength: 10,
-    workFocusLength: 50,
-    workBreakLength: 10,
     journalTags: defaultJournalTags(),
+    taskCategories: cloneDefaultTaskCategories(),
     taskTemplates: [],
     defaultsVersion: '0.2.0'
   };
@@ -5700,11 +5807,15 @@ function normalizedProfile() {
     ...defaultProfile(),
     ...systemTimeProfile,
     journalTags: normalizeJournalTags(systemTimeProfile.journalTags),
-    taskTemplates: normalizeTaskTemplates(systemTimeProfile.taskTemplates)
+    taskCategories: normalizeRawTaskCategories(systemTimeProfile.taskCategories),
+    taskTemplates: normalizeTaskTemplates(
+      systemTimeProfile.taskTemplates,
+      normalizeRawTaskCategories(systemTimeProfile.taskCategories)
+    )
   };
 }
 
-function normalizeTaskTemplates(value) {
+function normalizeTaskTemplates(value, categories = taskCategories()) {
   if (!Array.isArray(value)) return [];
   const seenIds = new Set();
   return value.map((template, templateIndex) => {
@@ -5715,11 +5826,14 @@ function normalizeTaskTemplates(value) {
       const startTime = normalizeTime(task && task.startTime);
       const endTime = normalizeTime(task && task.endTime);
       if (!title || timeToMinutes(startTime) === null || timeToMinutes(endTime) === null) return null;
+      const typeId = resolveTaskCategoryId(task && task.typeId, categories, task && task.type);
+      const category = categories.find((item) => item.id === typeId);
       return {
         startTime,
         endTime,
         title,
-        type: normalizeTaskType(task && task.type, title)
+        typeId,
+        type: category ? category.name : clean(task && task.type)
       };
     }).filter(Boolean);
     if (!name || items.length === 0) return null;
@@ -5742,16 +5856,48 @@ function normalizeTaskTemplates(value) {
 }
 
 function taskTemplates() {
-  return normalizeTaskTemplates(profile && profile.taskTemplates);
+  return normalizeTaskTemplates(profile && profile.taskTemplates, taskCategories());
 }
 
-function loadProfileToForm() {
-  const data = normalizedProfile();
-  breakReminder.checked = Boolean(data.breakReminder);
-  classDuration.value = String(data.classDuration || 50);
-  classBreakLength.value = String(data.classBreakLength || 10);
-  workFocusLength.value = String(data.workFocusLength || data.focusLength || 50);
-  workBreakLength.value = String(data.workBreakLength || 10);
+function taskCategories() {
+  return normalizeRawTaskCategories(profile && profile.taskCategories);
+}
+
+function taskCategoryById(categoryId, categories = taskCategories()) {
+  return categories.find((category) => category.id === clean(categoryId)) || null;
+}
+
+function taskCategoryFromInput(value, categories = taskCategories()) {
+  const text = clean(value);
+  if (!text) return null;
+  return categories.find((category) => category.id === text)
+    || categories.find((category) => category.name.toLocaleLowerCase('zh-CN') === text.toLocaleLowerCase('zh-CN'))
+    || taskCategoryById(legacyTaskTypeToCategoryId(text), categories);
+}
+
+function taskCategoryForTask(task, categories = taskCategories()) {
+  const categoryId = resolveTaskCategoryId(task && task.typeId, categories, task && task.type);
+  return taskCategoryById(categoryId, categories) || categories[0] || null;
+}
+
+function defaultTaskCategory(categories = taskCategories()) {
+  return categories.find((category) => category.active) || categories[0] || null;
+}
+
+function courseTaskCategory(categories = taskCategories()) {
+  return categories.find((category) => category.active && category.id === 'category-course')
+    || categories.find((category) => category.id === 'category-course')
+    || categories.find((category) => category.active && category.name === '课程')
+    || categories.find((category) => category.active && category.cycleEnabled)
+    || defaultTaskCategory(categories);
+}
+
+function taskCategoryUsage(categoryId) {
+  const taskCount = tasks.filter((task) => taskCategoryForTask(task)?.id === categoryId).length;
+  const templateCount = taskTemplates().reduce((count, template) => (
+    count + template.items.filter((item) => taskCategoryForTask(item)?.id === categoryId).length
+  ), 0);
+  return { taskCount, templateCount, total: taskCount + templateCount };
 }
 
 function defaultJournalTags() {
@@ -5790,9 +5936,31 @@ function journalTagById(tagId) {
   return journalTags().find((tag) => tag.id === clean(tagId)) || null;
 }
 
-function normalizeJournalTagId(value) {
-  const tagId = clean(value);
-  return journalTagById(tagId) ? tagId : '';
+function normalizeJournalTagIds(value) {
+  const selectedIds = new Set(normalizeRawJournalTagIds(value));
+  return journalTags().map((tag) => tag.id).filter((tagId) => selectedIds.has(tagId));
+}
+
+function journalTagIds(journal) {
+  if (!journal) return [];
+  const legacyTagId = clean(journal.tagId) || legacyRatingToTagId(journal.rating);
+  return normalizeJournalTagIds([
+    ...(Array.isArray(journal.tagIds) ? journal.tagIds : []),
+    legacyTagId
+  ]);
+}
+
+function selectedJournalTagIds(select) {
+  if (!select) return [];
+  return normalizeJournalTagIds(Array.from(select.selectedOptions || [], (option) => option.value));
+}
+
+function setSelectedJournalTagIds(select, tagIds) {
+  if (!select) return;
+  const selected = new Set(normalizeJournalTagIds(tagIds));
+  Array.from(select.options).forEach((option) => {
+    option.selected = selected.has(option.value);
+  });
 }
 
 function buildTagOptionText(tag) {
@@ -5800,15 +5968,13 @@ function buildTagOptionText(tag) {
 }
 
 function populateJournalTagSelects() {
-  const currentEditorValue = normalizeJournalTagId(journalTag && journalTag.value);
-  const currentFilterValue = normalizeJournalTagId(journalTagFilter && journalTagFilter.value) || appliedJournalTagFilter;
+  const currentEditorValues = selectedJournalTagIds(journalTag);
+  const currentFilterValues = selectedJournalTagIds(journalTagFilter).length
+    ? selectedJournalTagIds(journalTagFilter)
+    : appliedJournalTagFilters;
   [journalTag, journalTagFilter].forEach((select) => {
     if (!select) return;
     select.innerHTML = '';
-    const emptyOption = document.createElement('option');
-    emptyOption.value = '';
-    emptyOption.textContent = '无标签';
-    select.appendChild(emptyOption);
     journalTags().forEach((tag) => {
       const option = document.createElement('option');
       option.value = tag.id;
@@ -5816,18 +5982,39 @@ function populateJournalTagSelects() {
       select.appendChild(option);
     });
   });
-  if (journalTag) journalTag.value = currentEditorValue;
-  if (journalTagFilter) journalTagFilter.value = currentFilterValue;
+  setSelectedJournalTagIds(journalTag, currentEditorValues);
+  setSelectedJournalTagIds(journalTagFilter, currentFilterValues);
   renderTagPicker(journalTag, journalTagPaletteButton, journalTagPalette);
   renderTagPicker(journalTagFilter, journalTagFilterPaletteButton, journalTagFilterPalette);
 }
 
 function renderTagPicker(select, button, palette) {
   if (!select || !button || !palette) return;
-  const tag = journalTagById(select.value);
-  button.classList.toggle('empty', !tag);
-  button.style.background = tag ? tag.color : 'transparent';
-  button.title = tag ? `${tag.shortName}：${tag.fullName}` : '无标签';
+  const selectedIds = selectedJournalTagIds(select);
+  const selectedTags = selectedIds.map(journalTagById).filter(Boolean);
+  button.classList.toggle('empty', selectedTags.length === 0);
+  button.replaceChildren();
+  selectedTags.slice(0, 4).forEach((tag) => {
+    const swatch = document.createElement('span');
+    swatch.className = 'tag-picker-swatch';
+    swatch.style.background = tag.color;
+    button.appendChild(swatch);
+  });
+  if (selectedTags.length === 0 && button === journalTagFilterPaletteButton) {
+    const placeholder = document.createElement('span');
+    placeholder.className = 'tag-picker-placeholder';
+    placeholder.textContent = '选择标签';
+    button.appendChild(placeholder);
+  }
+  if (selectedTags.length > 4) {
+    const count = document.createElement('span');
+    count.className = 'tag-picker-count';
+    count.textContent = `+${selectedTags.length - 4}`;
+    button.appendChild(count);
+  }
+  button.title = selectedTags.length
+    ? selectedTags.map((tag) => `${tag.shortName}：${tag.fullName}`).join('\n')
+    : '未设置标签';
 
   palette.innerHTML = '';
   const emptyButton = createTagPaletteItem(null, select, button, palette);
@@ -5838,19 +6025,35 @@ function renderTagPicker(select, button, palette) {
 }
 
 function createTagPaletteItem(tag, select, button, palette) {
+  const selectedIds = new Set(selectedJournalTagIds(select));
   const item = document.createElement('button');
   item.type = 'button';
   item.className = 'tag-palette-item';
   item.classList.toggle('empty', !tag);
-  item.style.background = tag ? tag.color : 'transparent';
-  item.title = tag ? `${tag.shortName}：${tag.fullName}` : '无标签';
+  item.classList.toggle('selected', Boolean(tag && selectedIds.has(tag.id)));
+  item.title = tag ? `${tag.shortName}：${tag.fullName}` : '清除全部标签';
   item.setAttribute('aria-label', item.title);
+  item.setAttribute('aria-pressed', String(Boolean(tag && selectedIds.has(tag.id))));
+  const swatch = document.createElement('span');
+  swatch.className = 'tag-palette-swatch';
+  if (tag) swatch.style.background = tag.color;
+  else swatch.textContent = '×';
+  const label = document.createElement('span');
+  label.className = 'tag-palette-label';
+  label.textContent = tag ? tag.shortName : '清除全部';
+  const check = document.createElement('span');
+  check.className = 'tag-palette-check';
+  check.textContent = tag && selectedIds.has(tag.id) ? '✓' : '';
+  item.append(swatch, label, check);
   item.addEventListener('click', (event) => {
     event.stopPropagation();
-    select.value = tag ? tag.id : '';
+    if (!tag) {
+      setSelectedJournalTagIds(select, []);
+    } else {
+      const option = Array.from(select.options).find((candidate) => candidate.value === tag.id);
+      if (option) option.selected = !option.selected;
+    }
     select.dispatchEvent(new Event('change', { bubbles: true }));
-    palette.classList.add('hidden');
-    button.focus();
   });
   return item;
 }
@@ -5860,17 +6063,348 @@ function toggleTagPalette(palette) {
   const shouldOpen = palette.classList.contains('hidden');
   closeAllTagPalettes();
   palette.classList.toggle('hidden', !shouldOpen);
+  const button = palette === journalTagPalette ? journalTagPaletteButton : journalTagFilterPaletteButton;
+  if (button) button.setAttribute('aria-expanded', String(shouldOpen));
 }
 
 function closeAllTagPalettes() {
   [journalTagPalette, journalTagFilterPalette].forEach((palette) => {
     if (palette) palette.classList.add('hidden');
   });
+  [journalTagPaletteButton, journalTagFilterPaletteButton].forEach((button) => {
+    if (button) button.setAttribute('aria-expanded', 'false');
+  });
 }
 
 function closeTagPalettesOnOutsideClick(event) {
   if (event.target.closest('.tag-select-control')) return;
   closeAllTagPalettes();
+}
+
+function renderTaskCategorySettings() {
+  if (!taskCategorySettingsList) return;
+  const categories = taskCategories();
+  taskCategorySettingsList.innerHTML = '';
+
+  categories.forEach((category, index) => {
+    const item = document.createElement('div');
+    item.className = 'task-category-settings-item';
+    item.dataset.categoryId = category.id;
+
+    const header = document.createElement('div');
+    header.className = 'task-category-settings-header';
+
+    const color = document.createElement('input');
+    color.type = 'color';
+    color.value = category.color;
+    color.setAttribute('aria-label', `${category.name}的颜色`);
+    color.addEventListener('input', () => previewTaskCategoryColor(category.id, color.value));
+    color.addEventListener('change', () => void persistTaskCategoryColor(category.id, color.value));
+
+    const name = document.createElement('input');
+    name.type = 'text';
+    name.maxLength = 20;
+    name.value = category.name;
+    name.setAttribute('aria-label', '分类名称');
+    name.addEventListener('blur', () => void updateTaskCategory(category.id, 'name', name.value));
+    name.addEventListener('keydown', blurOnEnter);
+
+    const identity = document.createElement('div');
+    identity.className = 'task-category-identity';
+
+    const activeLabel = document.createElement('label');
+    activeLabel.className = 'task-category-active-toggle';
+    const active = document.createElement('input');
+    active.type = 'checkbox';
+    active.checked = category.active;
+    active.setAttribute('aria-label', `启用${category.name}`);
+    active.addEventListener('change', () => void updateTaskCategory(category.id, 'active', active.checked));
+    const activeText = document.createElement('span');
+    activeText.textContent = category.active ? '启用' : '停用';
+    activeLabel.append(active, activeText);
+
+    const usageText = document.createElement('span');
+    usageText.className = 'task-category-usage';
+    const usage = taskCategoryUsage(category.id);
+    usageText.textContent = usage.total ? `${usage.taskCount} 个任务 · ${usage.templateCount} 个模板项` : '尚未使用';
+    identity.append(name, usageText);
+
+    const order = document.createElement('div');
+    order.className = 'task-category-order-actions';
+    const up = createTaskCategoryOrderButton('↑', '上移分类', index === 0, () => moveTaskCategory(category.id, -1));
+    const down = createTaskCategoryOrderButton('↓', '下移分类', index === categories.length - 1, () => moveTaskCategory(category.id, 1));
+    order.append(up, down);
+
+    const actions = document.createElement('div');
+    actions.className = 'task-category-header-actions';
+    const deleteButton = document.createElement('button');
+    deleteButton.type = 'button';
+    deleteButton.className = 'task-category-delete-button';
+    deleteButton.textContent = '×';
+    deleteButton.title = `删除分类“${category.name}”`;
+    deleteButton.setAttribute('aria-label', deleteButton.title);
+    deleteButton.disabled = categories.length <= 1;
+    deleteButton.addEventListener('click', () => requestTaskCategoryDelete(category.id));
+    actions.append(activeLabel, order, deleteButton);
+    header.append(color, identity, actions);
+    item.appendChild(header);
+
+    const cycleRow = document.createElement('div');
+    cycleRow.className = 'task-category-cycle-row';
+    const cycleToggle = document.createElement('label');
+    cycleToggle.className = 'task-category-cycle-toggle';
+    const cycleCheckbox = document.createElement('input');
+    cycleCheckbox.type = 'checkbox';
+    cycleCheckbox.checked = category.cycleEnabled;
+    cycleCheckbox.addEventListener('change', () => void updateTaskCategory(category.id, 'cycleEnabled', cycleCheckbox.checked));
+    const cycleLabel = document.createElement('span');
+    cycleLabel.textContent = '启用周期';
+    cycleToggle.append(cycleCheckbox, cycleLabel);
+    cycleRow.appendChild(cycleToggle);
+
+    if (category.cycleEnabled) {
+      cycleRow.append(
+        createTaskCategoryMinutesField('专注', category.focusMinutes, (value) => updateTaskCategory(category.id, 'focusMinutes', value)),
+        createTaskCategoryMinutesField('休息', category.breakMinutes, (value) => updateTaskCategory(category.id, 'breakMinutes', value))
+      );
+    } else {
+      const hint = document.createElement('span');
+      hint.className = 'task-category-cycle-hint';
+      hint.textContent = '任务进行时只显示剩余时间';
+      cycleRow.appendChild(hint);
+    }
+    item.appendChild(cycleRow);
+
+    if (pendingTaskCategoryDeleteId === category.id && usage.total > 0) {
+      item.appendChild(createTaskCategoryReassignPanel(category, categories, usage));
+    }
+    taskCategorySettingsList.appendChild(item);
+  });
+}
+
+function createTaskCategoryMinutesField(label, value, onCommit) {
+  const field = document.createElement('label');
+  field.className = 'task-category-minutes-field';
+  const text = document.createElement('span');
+  text.textContent = `${label}（分钟）`;
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.min = '1';
+  input.max = '1440';
+  input.step = '1';
+  input.value = String(value);
+  input.addEventListener('blur', () => void onCommit(input.value));
+  input.addEventListener('keydown', blurOnEnter);
+  field.append(text, input);
+  return field;
+}
+
+function previewTaskCategoryColor(categoryId, value) {
+  const categories = taskCategories();
+  const category = taskCategoryById(categoryId, categories);
+  if (!category) return;
+  category.color = normalizeColor(value);
+  profile = { ...normalizedProfile(), taskCategories: categories };
+  document.querySelectorAll('[data-task-category-id]').forEach((control) => {
+    if (control.dataset.taskCategoryId === categoryId) styleTaskCategoryControl(control, category);
+  });
+  renderProfileStats();
+  publishFloatingTask();
+  window.clearTimeout(taskCategoryColorSaveTimers.get(categoryId));
+  taskCategoryColorSaveTimers.set(categoryId, window.setTimeout(async () => {
+    taskCategoryColorSaveTimers.delete(categoryId);
+    await saveState();
+  }, 250));
+}
+
+async function persistTaskCategoryColor(categoryId, value) {
+  previewTaskCategoryColor(categoryId, value);
+  window.clearTimeout(taskCategoryColorSaveTimers.get(categoryId));
+  taskCategoryColorSaveTimers.delete(categoryId);
+  await saveState();
+  renderTasksPreservingScroll();
+  renderTaskTemplateList();
+  renderProfileStats();
+}
+
+function createTaskCategoryOrderButton(text, label, disabled, onClick) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'task-category-order-button';
+  button.textContent = text;
+  button.title = label;
+  button.setAttribute('aria-label', label);
+  button.disabled = disabled;
+  button.addEventListener('click', () => void onClick());
+  return button;
+}
+
+function createTaskCategoryReassignPanel(category, categories, usage) {
+  const panel = document.createElement('div');
+  panel.className = 'task-category-reassign-panel';
+  const message = document.createElement('p');
+  message.textContent = `“${category.name}”仍用于 ${usage.taskCount} 个任务和 ${usage.templateCount} 个模板项。删除前请选择迁移目标。`;
+  const select = document.createElement('select');
+  select.setAttribute('aria-label', '迁移目标分类');
+  categories.filter((item) => item.id !== category.id).forEach((item) => select.add(new Option(item.name, item.id)));
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'secondary-button';
+  cancel.textContent = '取消';
+  cancel.addEventListener('click', () => {
+    pendingTaskCategoryDeleteId = '';
+    renderTaskCategorySettings();
+  });
+  const confirm = document.createElement('button');
+  confirm.type = 'button';
+  confirm.className = 'danger-button';
+  confirm.textContent = '迁移并删除';
+  confirm.addEventListener('click', () => void deleteTaskCategory(category.id, select.value));
+  panel.append(message, select, cancel, confirm);
+  return panel;
+}
+
+function setTaskCategorySettingsStatus(message = '', error = false) {
+  if (!taskCategorySettingsStatus) return;
+  taskCategorySettingsStatus.textContent = message;
+  taskCategorySettingsStatus.classList.toggle('hidden', !message);
+  taskCategorySettingsStatus.classList.toggle('is-error', error);
+}
+
+async function updateTaskCategory(categoryId, field, value) {
+  const categories = taskCategories();
+  const category = taskCategoryById(categoryId, categories);
+  if (!category) return;
+  setTaskCategorySettingsStatus();
+
+  if (field === 'name') {
+    const nextName = clean(value).slice(0, 20);
+    const duplicate = categories.some((item) => item.id !== categoryId && item.name.toLocaleLowerCase('zh-CN') === nextName.toLocaleLowerCase('zh-CN'));
+    if (!nextName || duplicate) {
+      setTaskCategorySettingsStatus(!nextName ? '分类名称不能为空。' : '分类名称不能重复。', true);
+      renderTaskCategorySettings();
+      return;
+    }
+    category.name = nextName;
+  } else if (field === 'color') {
+    category.color = normalizeColor(value);
+  } else if (field === 'cycleEnabled') {
+    category.cycleEnabled = Boolean(value);
+  } else if (field === 'focusMinutes') {
+    category.focusMinutes = boundedIntegerSetting(value, 50, 1, 1440);
+  } else if (field === 'breakMinutes') {
+    category.breakMinutes = boundedIntegerSetting(value, 10, 1, 1440);
+  } else if (field === 'active') {
+    if (!value && categories.filter((item) => item.active).length <= 1) {
+      setTaskCategorySettingsStatus('至少需要保留一个启用的任务分类。', true);
+      renderTaskCategorySettings();
+      return;
+    }
+    category.active = Boolean(value);
+  }
+
+  syncTaskCategoryNames(categories);
+  profile = { ...normalizedProfile(), taskCategories: categories, taskTemplates: profile.taskTemplates };
+  await saveState();
+  renderTaskCategorySettings();
+  renderTasksPreservingScroll();
+  renderProfileStats();
+}
+
+async function addTaskCategory() {
+  const categories = taskCategories();
+  categories.push({
+    id: `category-custom-${Date.now()}`,
+    name: `分类${categories.length + 1}`,
+    color: '#64748b',
+    cycleEnabled: false,
+    focusMinutes: 50,
+    breakMinutes: 10,
+    active: true
+  });
+  profile = { ...normalizedProfile(), taskCategories: categories };
+  await saveState();
+  setTaskCategorySettingsStatus('已新增分类，可直接修改名称、颜色和周期设置。');
+  renderTaskCategorySettings();
+}
+
+async function moveTaskCategory(categoryId, offset) {
+  const categories = taskCategories();
+  const index = categories.findIndex((category) => category.id === categoryId);
+  const targetIndex = index + offset;
+  if (index < 0 || targetIndex < 0 || targetIndex >= categories.length) return;
+  [categories[index], categories[targetIndex]] = [categories[targetIndex], categories[index]];
+  profile = { ...normalizedProfile(), taskCategories: categories };
+  await saveState();
+  renderTaskCategorySettings();
+  renderTasksPreservingScroll();
+  renderProfileStats();
+}
+
+async function requestTaskCategoryDelete(categoryId) {
+  const categories = taskCategories();
+  if (categories.length <= 1) {
+    setTaskCategorySettingsStatus('至少需要保留一个任务分类。', true);
+    return;
+  }
+  const usage = taskCategoryUsage(categoryId);
+  if (usage.total > 0) {
+    pendingTaskCategoryDeleteId = pendingTaskCategoryDeleteId === categoryId ? '' : categoryId;
+    renderTaskCategorySettings();
+    return;
+  }
+  await deleteTaskCategory(categoryId, '');
+}
+
+async function deleteTaskCategory(categoryId, replacementId) {
+  const categories = taskCategories();
+  const removed = taskCategoryById(categoryId, categories);
+  const replacement = taskCategoryById(replacementId, categories);
+  if (!removed || categories.length <= 1) return;
+  const usage = taskCategoryUsage(categoryId);
+  if (usage.total > 0 && !replacement) {
+    setTaskCategorySettingsStatus('请选择迁移目标分类。', true);
+    return;
+  }
+
+  if (replacement) {
+    tasks.forEach((task) => {
+      if (resolveTaskCategoryId(task.typeId, categories, task.type) !== categoryId) return;
+      task.typeId = replacement.id;
+      task.type = replacement.name;
+    });
+    const templates = taskTemplates().map((template) => ({
+      ...template,
+      items: template.items.map((item) => resolveTaskCategoryId(item.typeId, categories, item.type) === categoryId
+        ? { ...item, typeId: replacement.id, type: replacement.name }
+        : item)
+    }));
+    profile = { ...normalizedProfile(), taskTemplates: templates };
+  }
+
+  const nextCategories = categories.filter((category) => category.id !== categoryId);
+  profile = { ...normalizedProfile(), taskCategories: nextCategories, taskTemplates: profile.taskTemplates };
+  pendingTaskCategoryDeleteId = '';
+  await saveState();
+  setTaskCategorySettingsStatus(`已删除分类“${removed.name}”。`);
+  renderAll();
+}
+
+function syncTaskCategoryNames(categories = taskCategories()) {
+  tasks.forEach((task) => {
+    const category = taskCategoryForTask(task, categories);
+    if (!category) return;
+    task.typeId = category.id;
+    task.type = category.name;
+  });
+  if (!profile || !Array.isArray(profile.taskTemplates)) return;
+  profile.taskTemplates = normalizeTaskTemplates(profile.taskTemplates, categories).map((template) => ({
+    ...template,
+    items: template.items.map((item) => {
+      const category = taskCategoryForTask(item, categories);
+      return category ? { ...item, typeId: category.id, type: category.name } : item;
+    })
+  }));
 }
 
 function renderJournalTagSettings() {
@@ -5945,27 +6479,16 @@ async function addJournalTag() {
 async function deleteJournalTag(tagId) {
   const tags = journalTags().filter((tag) => tag.id !== tagId);
   profile = { ...normalizedProfile(), journalTags: tags };
-  journals = journals.map((journal) => (
-    clean(journal.tagId) === tagId ? { ...journal, tagId: '' } : journal
-  ));
+  journals = journals.map((journal) => ({
+    ...journal,
+    tagIds: journalTagIds(journal).filter((currentTagId) => currentTagId !== tagId)
+  }));
+  appliedJournalTagFilters = appliedJournalTagFilters.filter((currentTagId) => currentTagId !== tagId);
   await saveState();
   renderJournalTagSettings();
   populateJournalTagSelects();
   renderJournalList();
   renderSelectedJournal();
-}
-
-async function saveProfileFromForm() {
-  profile = {
-    ...normalizedProfile(),
-    focusLength: numericSetting(workFocusLength.value, 50),
-    breakReminder: breakReminder.checked,
-    classDuration: numericSetting(classDuration.value, 50),
-    classBreakLength: numericSetting(classBreakLength.value, 10),
-    workFocusLength: numericSetting(workFocusLength.value, 50),
-    workBreakLength: numericSetting(workBreakLength.value, 10)
-  };
-  await saveState();
 }
 
 async function getEffectiveNow() {
@@ -5978,6 +6501,12 @@ function numericSetting(value, fallback) {
   return Number.isFinite(number) && number > 0 ? number : fallback;
 }
 
+function boundedIntegerSetting(value, fallback, min, max) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(number)));
+}
+
 async function initializeAppData() {
   try {
     const result = await window.whbr.loadData();
@@ -5988,15 +6517,16 @@ async function initializeAppData() {
     };
     const migratedProfile = migrateProfileDefaults(profile);
     profile = migratedProfile.profile;
+    const migratedTaskCategories = normalizeTaskCategoryAssignments();
     const migratedTasks = normalizeTaskDayBoundaries();
     journals = normalizeJournalCollection(result.data.journals || []);
     storagePaths = result.paths || storagePaths;
     setDateInputValue(journalViewDate, latestJournalDate() || journalDate.value || formatLocalDate(new Date()));
-    loadProfileToForm();
     populateJournalTagSelects();
     renderJournalTagSettings();
+    renderTaskCategorySettings();
     await migrateLegacyLocalStorageIfNeeded();
-    if (migratedProfile.changed || migratedTasks.changed) await saveState();
+    if (migratedProfile.changed || migratedTaskCategories.changed || migratedTasks.changed) await saveState();
     updateStoragePathView();
     renderAll();
     if (pages.tasks.classList.contains('active')) {
@@ -6016,28 +6546,63 @@ function migrateProfileDefaults(profileData) {
     migrated.journalTags = normalizedTags;
     changed = true;
   }
-  const normalizedTemplates = normalizeTaskTemplates(migrated.taskTemplates);
+  const legacyClassMinutes = Number(migrated.classDuration) === 45 ? 50 : numericSetting(migrated.classDuration, 50);
+  const legacyFocusMinutes = Number(migrated.workFocusLength || migrated.focusLength) === 45
+    ? 50
+    : numericSetting(migrated.workFocusLength || migrated.focusLength, 50);
+  const categorySource = Array.isArray(migrated.taskCategories)
+    ? migrated.taskCategories.map((category) => {
+      if (!category || typeof category !== 'object') return category;
+      const wasCourseCycle = category.behavior === 'course';
+      const wasFocusCycle = category.behavior === 'focus';
+      return {
+        ...category,
+        cycleEnabled: typeof category.cycleEnabled === 'boolean'
+          ? category.cycleEnabled
+          : wasCourseCycle || wasFocusCycle,
+        focusMinutes: category.focusMinutes || (wasCourseCycle
+          ? legacyClassMinutes
+          : legacyFocusMinutes),
+        breakMinutes: category.breakMinutes || (wasCourseCycle
+          ? numericSetting(migrated.classBreakLength, 10)
+          : numericSetting(migrated.workBreakLength, 10))
+      };
+    })
+    : migrated.taskCategories;
+  const normalizedCategories = normalizeRawTaskCategories(categorySource);
+  if (JSON.stringify(migrated.taskCategories || []) !== JSON.stringify(normalizedCategories)) {
+    migrated.taskCategories = normalizedCategories;
+    changed = true;
+  }
+  const normalizedTemplates = normalizeTaskTemplates(migrated.taskTemplates, normalizedCategories);
   if (JSON.stringify(migrated.taskTemplates || []) !== JSON.stringify(normalizedTemplates)) {
     migrated.taskTemplates = normalizedTemplates;
     changed = true;
   }
+  ['focusLength', 'breakReminder', 'classDuration', 'classBreakLength', 'workFocusLength', 'workBreakLength'].forEach((field) => {
+    if (!Object.prototype.hasOwnProperty.call(migrated, field)) return;
+    delete migrated[field];
+    changed = true;
+  });
   if (migrated.defaultsVersion !== '0.2.0') {
-    if (Number(migrated.classDuration) === 45) {
-      migrated.classDuration = 50;
-      changed = true;
-    }
-    if (Number(migrated.workFocusLength) === 45) {
-      migrated.workFocusLength = 50;
-      changed = true;
-    }
-    if (Number(migrated.focusLength) === 45) {
-      migrated.focusLength = 50;
-      changed = true;
-    }
     migrated.defaultsVersion = '0.2.0';
     changed = true;
   }
   return { profile: migrated, changed };
+}
+
+function normalizeTaskCategoryAssignments() {
+  const categories = taskCategories();
+  let changed = false;
+  tasks.forEach((task) => {
+    const categoryId = resolveTaskCategoryId(task.typeId, categories, task.type || inferTaskType(task.title));
+    const category = taskCategoryById(categoryId, categories);
+    if (!category) return;
+    if (task.typeId !== category.id || task.type !== category.name) changed = true;
+    task.typeId = category.id;
+    task.type = category.name;
+  });
+  return { changed };
 }
 
 function latestJournalDate() {
@@ -6277,7 +6842,6 @@ async function confirmReset() {
     clearMedia: selectedContents.includes('media')
   });
   clearLegacyLocalStorage();
-  firedReminderKeys.clear();
   storagePaths = result.paths || storagePaths;
   loadProfileToForm();
   updateStoragePathView();

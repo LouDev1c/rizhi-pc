@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>日织 · 当前任务</title>
+    <link rel="stylesheet" href="./floating-task.css" />
+  </head>
+  <body>
+    <main id="bubble" class="task-bubble" title="按住任意空白处拖动">
+      <button id="dockRevealButton" class="dock-reveal-button" type="button" aria-label="展开悬浮任务气泡" title="点击展开"></button>
+      <div class="bubble-header">
+        <span id="stateDot" class="state-dot" aria-hidden="true"></span>
+        <span id="stateText">当前进行中</span>
+        <button id="topmostButton" class="topmost-button" type="button" aria-pressed="true" title="取消置顶">置顶</button>
+      </div>
+      <div class="task-summary">
+        <div class="task-info">
+          <h1 id="taskTitle">正在读取任务…</h1>
+          <p id="taskTime" class="task-time">--:-- - --:--</p>
+        </div>
+        <div class="countdown-row">
+          <span id="countdownLabel">专注剩余</span>
+          <strong id="countdown">--:--</strong>
+        </div>
+      </div>
+      <p id="taskDetails" class="task-details">事前计划或备注会显示在这里</p>
+    </main>
+    <script src="./floating-task.js"></script>
+  </body>
+</html>

@@ -24,6 +24,11 @@
     return String(value || '').trim();
   }
 
+  function normalizeJournalTagIds(value) {
+    const values = Array.isArray(value) ? value : [value];
+    return [...new Set(values.map(normalizeJournalTagId).filter(Boolean))];
+  }
+
   function legacyRatingToTagId(value) {
     return LEGACY_RATING_TO_TAG_ID[normalizeJournalTagId(value)] || '';
   }
@@ -31,6 +36,7 @@
   return {
     DEFAULT_JOURNAL_TAGS,
     legacyRatingToTagId,
-    normalizeJournalTagId
+    normalizeJournalTagId,
+    normalizeJournalTagIds
   };
 }));

@@ -42,11 +42,16 @@ const {
         id: 'journal-1',
         date: '2026-09-26',
         content: '测试记录',
+        tagId: 'legacy-5',
+        tagIds: ['legacy-3', 'legacy-5'],
         media: [{ id: 'media-1', kind: 'image', sourcePath: mediaRelativePath, mediaRoot: initialPaths.mediaDirectory }]
       }],
       profile: { classDuration: 50 }
     };
     await saveData(app, data);
+    const savedMonth = JSON.parse(await fs.readFile(path.join(initialPaths.dataDirectory, 'rizhi-data-2026-09.json'), 'utf8'));
+    assert.deepEqual(savedMonth.journals[0].tagIds, ['legacy-3', 'legacy-5']);
+    assert.equal(Object.hasOwn(savedMonth.journals[0], 'tagId'), false);
 
     const nextStorageRoot = path.join(testRoot, 'migrated-root');
     const dataMigration = await setStorageRoot(app, nextStorageRoot, data);
@@ -57,6 +62,9 @@ const {
     assert.equal(dataMigration.paths.settingsLocationPath, path.join(userData, 'rizhi-settings-location.json'));
     assert.equal(dataMigration.paths.mediaDirectory, migratedMediaRoot);
     assert.equal(dataMigration.data.journals[0].media[0].mediaRoot, migratedMediaRoot);
+    const migratedMonth = JSON.parse(await fs.readFile(path.join(nextStorageRoot, 'rizhi-data-2026-09.json'), 'utf8'));
+    assert.deepEqual(migratedMonth.journals[0].tagIds, ['legacy-3', 'legacy-5']);
+    assert.equal(Object.hasOwn(migratedMonth.journals[0], 'tagId'), false);
     assert.equal(await fs.readFile(path.join(migratedMediaRoot, ...mediaRelativePath.split('/')), 'utf8'), 'media-one');
     await assert.rejects(fs.access(initialMediaFile), /ENOENT/);
     await assert.rejects(fs.access(path.join(initialPaths.dataDirectory, 'rizhi-data-2026-09.json')), /ENOENT/);

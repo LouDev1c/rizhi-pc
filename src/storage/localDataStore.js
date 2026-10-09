@@ -1,6 +1,6 @@
 const fsSync = require('fs');
 const fs = require('fs/promises');
-const { legacyRatingToTagId, normalizeJournalTagId } = require('../shared/journalTags');
+const { legacyRatingToTagId, normalizeJournalTagIds } = require('../shared/journalTags');
 const path = require('path');
 
 const LEGACY_DATA_FILE_NAME = 'whbr-data.json';
@@ -869,14 +869,15 @@ function normalizeJournalForStorage(journal) {
   const dateRangeStart = normalizeDate(journal && journal.dateRangeStart);
   const dateRangeEnd = normalizeDate(journal && journal.dateRangeEnd);
   const date = dateRangeStart || normalizeDate(journal && journal.date);
-  const { rating, ...journalWithoutRating } = journal || {};
+  const { rating, tagId, tagIds, ...journalWithoutLegacyTags } = journal || {};
+  const legacyTagId = tagId || legacyRatingToTagId(rating);
 
   return {
-    ...journalWithoutRating,
+    ...journalWithoutLegacyTags,
     date,
     dateRangeStart,
     dateRangeEnd,
-    tagId: normalizeJournalTagId(journal && (journal.tagId || legacyRatingToTagId(rating)))
+    tagIds: normalizeJournalTagIds([...(Array.isArray(tagIds) ? tagIds : []), legacyTagId])
   };
 }
 
